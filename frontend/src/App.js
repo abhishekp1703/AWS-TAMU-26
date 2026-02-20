@@ -4,6 +4,28 @@ import axios from 'axios';
 
 const API_URL = 'https://pt9x0911sc.execute-api.us-west-2.amazonaws.com/prod';
 
+const DEMO_FALLBACK = {
+  interview_id: 'demo',
+  company_name: 'H-E-B',
+  sector: 'Texas Retail',
+  brief: `H-E-B — Texas Retail Demo Brief
+
+Company overview: H-E-B is a privately held supermarket chain headquartered in San Antonio, Texas, with over 400 stores in Texas and Mexico. Founded in 1905, it is one of the largest private employers in Texas.
+
+Key themes for interview:
+• Private ownership and long-term strategy
+• Texas retail and community focus
+• Supply chain and private label
+• Competition with national chains and regional players`,
+  questions: [
+    { question: 'How does H-E-B think about balancing private label vs national brands in different categories?', rationale: 'Shows category strategy.', follow_up_vague: 'Can you give an example of a category where that balance shifted?', follow_up_deep: 'How do you measure success when you expand private label in a category?' },
+    { question: "What does 'Texas-first' mean operationally when it comes to sourcing and supply chain?", rationale: 'Gets at operational reality.', follow_up_vague: 'Where do you see the biggest tradeoffs?', follow_up_deep: 'How do you decide when to go local vs regional vs national for a given product?' },
+    { question: 'How does H-E-B decide where to open a new store versus deepen presence in existing markets?', rationale: 'Reveals real estate and growth strategy.', follow_up_vague: 'What metrics matter most?', follow_up_deep: 'What has surprised you about customer behavior in newer vs mature markets?' }
+  ],
+  interviewee_email: 'Demo: Pre-interview email content for H-E-B would appear here. This is fallback data when the API is unavailable.',
+  schema: { company_profile: {}, revenue_mechanics: {}, constraint_map: {}, market_structure: {}, strategic_tensions: {}, schema_completeness_percent: 0 }
+};
+
 // Inject Google Fonts
 const fontLink = document.createElement('link');
 fontLink.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap';
@@ -137,7 +159,7 @@ function Home() {
   const steps=['🔍 Searching web sources...','📰 Pulling recent news...','🔗 Analyzing LinkedIn presence...','🧠 Summarizing with Bedrock...','📊 Querying institutional memory...','✅ Brief ready'];
 
   const generate=async()=>{
-    if(!company.trim()) return alert('Please enter a company name');
+    if(!company.trim()) return;
     setLoading(true);
     setCompletedSteps([]);
     steps.forEach((step,i)=>{
@@ -160,18 +182,13 @@ function Home() {
       const result = rd.body ? JSON.parse(rd.body) : rd;
       navigate(`/brief/${result.interview_id}`, { state: { intervieweeName, intervieweeTitle, sector, company } });
     } catch (err) {
-      console.error(err);
-      const status = err.response?.status;
-      const is4xx = status >= 400 && status < 500;
-      if (is4xx && err.response?.data != null) {
-        const msg = typeof err.response.data === 'string' ? err.response.data : (err.response.data?.message || err.response.data?.error || JSON.stringify(err.response.data));
-        alert(`Request failed (${status}): ${msg}`);
-      } else if (is4xx) {
-        alert(`Request failed (${status}): ${err.response?.statusText || 'Client error'}`);
-      } else {
-        alert('Generation failed — check console and Lambda logs.');
-      }
+      console.warn('API unavailable, loading demo data:', err?.message ?? err);
       setLoading(false);
+      try {
+        navigate('/brief/demo', { state: { demoData: DEMO_FALLBACK, intervieweeName, intervieweeTitle, sector, company } });
+      } catch (navErr) {
+        console.warn('Navigate failed:', navErr?.message ?? navErr);
+      }
     }
   };
 
@@ -260,6 +277,11 @@ function Brief() {
   const [showResponseModal,setShowResponseModal]=useState(false);
   
   const load=useCallback(async()=>{
+    if(id==='demo'&&location.state?.demoData){
+      setData(location.state.demoData);
+      setSessionData({intervieweeName:location.state.intervieweeName||'',intervieweeTitle:location.state.intervieweeTitle||'',sector:location.state.sector||'Texas Retail',company:location.state.company||'H-E-B'});
+      return;
+    }
     const url=`${API_URL}/brief/${id}`;
     console.log('[AXIS API] GET', url);
     try {
@@ -267,19 +289,9 @@ function Brief() {
       const rd=typeof r.data==='string'?JSON.parse(r.data):r.data;
       setData(rd.body?JSON.parse(rd.body):rd);
     } catch(e){
-      console.error(e);
-      const status=e.response?.status;
-      const is4xx=status>=400&&status<500;
-      if(is4xx&&e.response?.data!=null){
-        const msg=typeof e.response.data==='string'?e.response.data:(e.response.data?.message||e.response.data?.error||JSON.stringify(e.response.data));
-        alert(`Failed to load brief (${status}): ${msg}`);
-      } else if(is4xx){
-        alert(`Failed to load brief (${status}): ${e.response?.statusText||'Client error'}`);
-      } else {
-        alert('Failed to load brief — check console and network.');
-      }
+      console.warn('Failed to load brief:', e.message);
     }
-  },[id]);
+  },[id, location.state]);
   useEffect(()=>{load();},[load]);
   
   useEffect(()=>{
@@ -592,7 +604,7 @@ function PostInterviewDebrief({interviewId,companyName,intervieweeName,interview
   const [saved,setSaved]=useState(completed||false);
 
   const save=async()=>{
-    if(!insights.trim()) return alert('Please add at least one key insight.');
+    if(!insights.trim()) return;
     setSaving(true);
     const body={
       what_ai_got_wrong:wrong,
@@ -607,6 +619,13 @@ function PostInterviewDebrief({interviewId,companyName,intervieweeName,interview
       question_ratings:questionRatings,
       completed_schema:schema||{}
     };
+    if(interviewId==='demo'){
+      console.log('[AXIS] Demo mode: debrief saved locally (no API call)');
+      setSaving(false);
+      setSaved(true);
+      if(onComplete) onComplete();
+      return;
+    }
     const url=`${API_URL}/debrief/${interviewId}`;
     console.log('[AXIS API] POST', url, body);
     try{
@@ -614,17 +633,7 @@ function PostInterviewDebrief({interviewId,companyName,intervieweeName,interview
       setSaved(true);
       if(onComplete) onComplete();
     }catch(e){
-      console.error(e);
-      const status=e.response?.status;
-      const is4xx=status>=400&&status<500;
-      if(is4xx&&e.response?.data!=null){
-        const msg=typeof e.response.data==='string'?e.response.data:(e.response.data?.message||e.response.data?.error||JSON.stringify(e.response.data));
-        alert(`Save failed (${status}): ${msg}`);
-      } else if(is4xx){
-        alert(`Save failed (${status}): ${e.response?.statusText||'Client error'}`);
-      } else {
-        alert('Save failed.');
-      }
+      console.warn('Debrief save failed:', e.message);
     }finally{setSaving(false);}
   };
 
@@ -712,17 +721,7 @@ function IntervieweeMicrosite(){
       setSubmitting(false);
       setSubmitted(true);
     }catch(e){
-      console.error(e);
-      const status=e.response?.status;
-      const is4xx=status>=400&&status<500;
-      if(is4xx&&e.response?.data!=null){
-        const msg=typeof e.response.data==='string'?e.response.data:(e.response.data?.message||e.response.data?.error||JSON.stringify(e.response.data));
-        alert(`Submission failed (${status}): ${msg}`);
-      } else if(is4xx){
-        alert(`Submission failed (${status}): ${e.response?.statusText||'Client error'}`);
-      } else {
-        alert('Submission failed.');
-      }
+      console.warn('Interviewee submission failed:', e.message);
       setSubmitting(false);
     }
   };
@@ -795,19 +794,7 @@ function IntervieweePage(){
     console.log('[AXIS API] GET', url);
     axios.get(url)
       .then(r=>{const rd=typeof r.data==='string'?JSON.parse(r.data):r.data;setData(rd.body?JSON.parse(rd.body):rd);})
-      .catch(e=>{
-        console.error(e);
-        const status=e.response?.status;
-        const is4xx=status>=400&&status<500;
-        if(is4xx&&e.response?.data!=null){
-          const msg=typeof e.response.data==='string'?e.response.data:(e.response.data?.message||e.response.data?.error||JSON.stringify(e.response.data));
-          alert(`Failed to load (${status}): ${msg}`);
-        } else if(is4xx){
-          alert(`Failed to load (${status}): ${e.response?.statusText||'Client error'}`);
-        } else {
-          alert('Failed to load — check console and network.');
-        }
-      })
+      .catch(e=>{ console.warn('Failed to load brief:', e.message); })
       .finally(()=>setLoading(false));
   },[id]);
 
