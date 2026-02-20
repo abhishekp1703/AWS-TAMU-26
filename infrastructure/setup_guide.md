@@ -1,472 +1,344 @@
-#!/usr/bin/env bash
-set -euo pipefail
+# AWS Setup Guide — Complete Step by Step
+### Written for people who have never used AWS before
 
-# Usage:
-#   ./deploy.sh                -> deploys to default region (us-east-1)
-#   ./deploy.sh us-west-2     -> deploys to provided region
-# Override repo root with REPO_ROOT env if needed
+> ⚠️ ONE PERSON does all of this while sharing their screen.
+> Everyone else watches and updates WAR_ROOM.md with every value created.
 
-REPO_ROOT="${REPO_ROOT:-$HOME/AWS-TAMU-26}"
-REGION="${1:-${AWS_REGION:-us-east-1}}"
+---
 
-echo "Repo root: $REPO_ROOT"
-echo "Region: $REGION"
+## Golden Rules
+1. **ALWAYS use region: us-east-1** — set this before creating anything
+2. **Copy every ARN/URL into WAR_ROOM.md immediately**
+3. **Never close a tab until you've copied what you need**
+4. **Do services in this exact order** — each depends on the previous
 
-# Ensure AWS CLI works
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-BUCKET_NAME="axis-interviews-${ACCOUNT_ID}"
+---
 
-echo "=== AXIS Deployment Starting ==="
-echo "Account: $ACCOUNT_ID | Bucket: $BUCKET_NAME | Region: $REGION"
+## ⏱ Estimated Setup Time: 45 minutes total
 
-# 1. IAM ROLE
-echo "--- Creating IAM role..."
-if aws iam get-role --role-name axis-lambda-role 2>/dev/null; then
-    ROLE_ARN=$(aws iam get-role --role-name axis-lambda-role --query 'Role.Arn' --output text)
-    echo "Role already exists: $ROLE_ARN"
-else
-    cat > /tmp/trust.json << 'TRUSTEOF'
-{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}
-TRUSTEOF
-    ROLE_ARN=$(aws iam create-role --role-name axis-lambda-role \
-        --assume-role-policy-document file:///tmp/trust.json \
-        --query 'Role.Arn' --output text)
-    for P in AmazonBedrockFullAccess AmazonS3FullAccess AmazonDynamoDBFullAccess AWSLambdaBasicExecutionRole; do
-        aws iam attach-role-policy --role-name axis-lambda-role \
-            --policy-arn "arn:aws:iam::aws:policy/$P"
-        echo "Attached $P"
-    done
-    echo "Waiting 15s for role to propagate..."
-    sleep 15
-fi
-echo "Role ARN: $ROLE_ARN"
+---
 
-# 2. S3 BUCKET
-echo "--- Creating S3 bucket..."
-if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
-    echo "Bucket $BUCKET_NAME already exists"
-else
-    if [ "$REGION" = "us-east-1" ]; then
-        aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION"
-    else
-        aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION" \
-            --create-bucket-configuration LocationConstraint="$REGION"
-    fi
-    aws s3api put-public-access-block --bucket "$BUCKET_NAME" \
-        --public-access-block-configuration \
-        BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
-    cat > /tmp/cors.json << 'CORSEOF'
-{"CORSRules":[{"AllowedHeaders":["*"],"AllowedMethods":["GET","PUT","POST","DELETE"],"AllowedOrigins":["*"],"ExposeHeaders":[]}]}
-CORSEOF
-    aws s3api put-bucket-cors --bucket "$BUCKET_NAME" --cors-configuration file:///tmp/cors.json
-    echo "Created bucket: $BUCKET_NAME"
-fi
+## STEP 1: Set Your Region (2 min)
+1. Log into https://console.aws.amazon.com
+2. Top-right corner — click the region dropdown
+3. Select **US East (N. Virginia) — us-east-1**
+4. ✅ Done — never change this
 
-# 3. DYNAMODB TABLES
-echo "--- Creating DynamoDB tables..."
-aws dynamodb describe-table --table-name axis-interviews --region "$REGION" 2>/dev/null || \
-    aws dynamodb create-table \
-        --table-name axis-interviews \
-        --attribute-definitions AttributeName=interview_id,AttributeType=S \
-        --key-schema AttributeName=interview_id,KeyType=HASH \
-        --billing-mode PAY_PER_REQUEST --region "$REGION" > /dev/null
-echo "axis-interviews ready"
+---
 
-aws dynamodb describe-table --table-name axis-institutional-memory --region "$REGION" 2>/dev/null || \
-    aws dynamodb create-table \
-        --table-name axis-institutional-memory \
-        --attribute-definitions \
-            AttributeName=sector,AttributeType=S \
-            AttributeName=interview_id,AttributeType=S \
-        --key-schema \
-            AttributeName=sector,KeyType=HASH \
-            AttributeName=interview_id,KeyType=RANGE \
-        --billing-mode PAY_PER_REQUEST --region "$REGION" > /dev/null
-echo "axis-institutional-memory ready"
+## STEP 2: IAM Role (5 min)
+> Gives your Lambda functions permission to use other AWS services
 
-# Helpers for Lambda deploy
-wait_for_lambda_ready() {
-    NAME=$1
-    # wait up to 5 minutes for LastUpdateStatus != InProgress
-    end=$((SECONDS+300))
-    while [ $SECONDS -lt $end ]; do
-        status=$(aws lambda get-function-configuration --function-name "$NAME" --region "$REGION" --query 'LastUpdateStatus' --output text 2>/dev/null || echo "None")
-        if [ "$status" != "InProgress" ]; then
-            break
-        fi
-        echo "Waiting for $NAME LastUpdateStatus -> $status"
-        sleep 2
-    done
-}
+1. Search **IAM** in top search bar → click it
+2. Left sidebar → click **Roles**
+3. Click **Create role** (top right, orange button)
+4. Configure:
+   ```
+   Trusted entity type: AWS service
+   Service: Lambda
+   → Click Next
+   ```
+5. Search and add these permissions (search each one, check the box):
+   ```
+   ✓ AmazonBedrockFullAccess
+   ✓ AmazonS3FullAccess
+   ✓ AmazonDynamoDBFullAccess
+   ✓ AWSLambdaBasicExecutionRole
+   ✓ AmazonSESFullAccess
+   → Click Next
+   ```
+6. Name it:
+   ```
+   Role name: axis-lambda-role
+   → Click Create role
+   ```
+7. Click on **axis-lambda-role** in the list
+8. Copy the **ARN** (looks like `arn:aws:iam::123456789:role/axis-lambda-role`)
+9. **Paste ARN into WAR_ROOM.md**
 
-safe_update_configuration() {
-    NAME=$1
-    shift
-    # try once, on ResourceConflict wait and retry once
-    if ! aws lambda update-function-configuration --function-name "$NAME" "$@" --region "$REGION" 2>/tmp/lcfg.err; then
-        echo "First update-config failed, retrying once..."
-        sleep 3
-        aws lambda update-function-configuration --function-name "$NAME" "$@" --region "$REGION"
-    fi
-}
+---
 
-# 4. LAMBDA FUNCTIONS
-echo "--- Deploying Lambda functions..."
-deploy_lambda() {
-    NAME=$1; SRCFILE=$2; TIMEOUT=$3; MEMORY=$4
-    mkdir -p /tmp/lpkg
-    rm -rf /tmp/lpkg/*
-    cp "$REPO_ROOT/$SRCFILE" /tmp/lpkg/lambda_function.py
-    (cd /tmp/lpkg && zip -q lambda.zip lambda_function.py)
-    if aws lambda get-function --function-name "$NAME" --region "$REGION" 2>/dev/null; then
-        aws lambda update-function-code --function-name "$NAME" \
-            --zip-file fileb:///tmp/lpkg/lambda.zip --region "$REGION"
-        wait_for_lambda_ready "$NAME"
-    else
-        aws lambda create-function \
-            --function-name "$NAME" --runtime python3.12 \
-            --role "$ROLE_ARN" \
-            --handler lambda_function.lambda_handler \
-            --zip-file fileb:///tmp/lpkg/lambda.zip \
-            --timeout "$TIMEOUT" --memory-size "$MEMORY" \
-            --region "$REGION"
-        wait_for_lambda_ready "$NAME"
-    fi
+## STEP 3: S3 Bucket (5 min)
+> Stores all generated briefs and documents
 
-    # Set bucket env var for pipeline and get-brief
-    if [ "$NAME" = "axis-pipeline" ] || [ "$NAME" = "axis-get-brief" ]; then
-        safe_update_configuration "$NAME" --environment "Variables={BUCKET_NAME=$BUCKET_NAME}"
-    fi
+1. Search **S3** → click it
+2. Click **Create bucket** (orange button)
+3. Configure:
+   ```
+   Bucket name: axis-interviews-[yourteamname]
+   (Must be globally unique — add random numbers if it says "already exists")
+   AWS Region: us-east-1
+   ```
+4. Under **Block Public Access settings**:
+   ```
+   UNCHECK "Block all public access"
+   Check the acknowledgment checkbox that appears
+   ```
+5. Everything else: leave as default
+6. Click **Create bucket**
+7. **Paste bucket name into WAR_ROOM.md**
 
-    echo "Deployed $NAME"
-    cd "$REPO_ROOT"
-}
+8. Click your bucket name → **Permissions** tab → scroll to **CORS** → Edit → paste:
+   ```json
+   [
+     {
+       "AllowedHeaders": ["*"],
+       "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
+       "AllowedOrigins": ["*"],
+       "ExposeHeaders": []
+     }
+   ]
+   ```
+9. Click **Save changes**
 
-deploy_lambda "axis-scraper"     "backend/lambda_scraper/lambda_function.py"    30  128
-deploy_lambda "axis-pipeline"    "backend/lambda_pipeline/lambda_function.py"   300 512
-deploy_lambda "axis-interviewee" "backend/lambda_interviewee/lambda_function.py" 30 128
-deploy_lambda "axis-get-brief"   "backend/lambda_debrief/lambda_function.py"    30  128
+---
 
-# 5. API GATEWAY
-echo "--- Creating API Gateway..."
-EXISTING=$(aws apigateway get-rest-apis --region "$REGION" \
-    --query "items[?name=='axis-api'].id" --output text 2>/dev/null || echo "")
-if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
-    API_ID=$EXISTING
-    echo "axis-api already exists: $API_ID"
-else
-    API_ID=$(aws apigateway create-rest-api --name axis-api \
-        --endpoint-configuration types=REGIONAL \
-        --region "$REGION" --query 'id' --output text)
-    echo "Created API: $API_ID"
-fi
+## STEP 4: DynamoDB Tables (5 min)
+> Your database for storing interview data
 
-ROOT_ID=$(aws apigateway get-resources --rest-api-id "$API_ID" \
-    --region "$REGION" --query "items[?path=='/'].id" --output text)
+1. Search **DynamoDB** → click it
+2. Left sidebar → **Tables** → **Create table**
 
-mk_resource() {
-    EXISTING=$(aws apigateway get-resources --rest-api-id "$1" --region "$REGION" \
-        --query "items[?pathPart=='$3'&&parentId=='$2'].id" --output text 2>/dev/null || echo "")
-    if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then echo "$EXISTING"
-    else aws apigateway create-resource --rest-api-id "$1" --parent-id "$2" \
-        --path-part "$3" --region "$REGION" --query 'id' --output text; fi
-}
+**Table 1:**
+```
+Table name: axis-interviews
+Partition key: interview_id  (type: String)
+Sort key: leave empty
+Settings: Default settings
+→ Click Create table
+→ Wait for Status to show "Active" (30-60 seconds)
+```
 
-mk_method() {
-    API=$1; RES=$2; METHOD=$3; FUNC=$4
-    URI="arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:${FUNC}/invocations"
-    aws apigateway put-method --rest-api-id "$API" --resource-id "$RES" \
-        --http-method "$METHOD" --authorization-type NONE \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws apigateway put-integration --rest-api-id "$API" --resource-id "$RES" \
-        --http-method "$METHOD" --type AWS_PROXY \
-        --integration-http-method POST --uri "$URI" \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws lambda add-permission --function-name "$FUNC" \
-        --statement-id "apigw-${RES}-${METHOD}-$$" \
-        --action lambda:InvokeFunction --principal apigateway.amazonaws.com \
-        --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API}/*/*" \
-        --region "$REGION" > /dev/null 2>&1 || true
-    # CORS OPTIONS
-    aws apigateway put-method --rest-api-id "$API" --resource-id "$RES" \
-        --http-method OPTIONS --authorization-type NONE \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws apigateway put-integration --rest-api-id "$API" --resource-id "$RES" \
-        --http-method OPTIONS --type MOCK \
-        --request-templates '{"application/json":"{\"statusCode\":200}"}' \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws apigateway put-method-response --rest-api-id "$API" --resource-id "$RES" \
-        --http-method OPTIONS --status-code 200 \
-        --response-parameters '{"method.response.header.Access-Control-Allow-Headers":false,"method.response.header.Access-Control-Allow-Methods":false,"method.response.header.Access-Control-Allow-Origin":false}' \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws apigateway put-integration-response --rest-api-id "$API" --resource-id "$RES" \
-        --http-method OPTIONS --status-code 200 \
-        --response-parameters "{\"method.response.header.Access-Control-Allow-Headers\":\"'Content-Type'\",\"method.response.header.Access-Control-Allow-Methods\":\"'GET,POST,OPTIONS'\",\"method.response.header.Access-Control-Allow-Origin\":\"'*'\"}" \
-        --region "$REGION" > /dev/null 2>&1 || true
-}
+**Table 2:** Click **Create table** again
+```
+Table name: axis-institutional-memory
+Partition key: sector  (type: String)
+Sort key: interview_id  (type: String)
+Settings: Default settings
+→ Click Create table
+```
 
-SCRAPE_ID=$(mk_resource "$API_ID" "$ROOT_ID" "scrape")
-mk_method "$API_ID" "$SCRAPE_ID" "POST" "axis-scraper"
+✅ Both tables in WAR_ROOM.md
 
-GEN_ID=$(mk_resource "$API_ID" "$ROOT_ID" "generate")
-mk_method "$API_ID" "$GEN_ID" "POST" "axis-pipeline"
+---
 
-BRIEF_ID=$(mk_resource "$API_ID" "$ROOT_ID" "brief")
-BRIEF_P=$(mk_resource "$API_ID" "$BRIEF_ID" "{id}")
-mk_method "$API_ID" "$BRIEF_P" "GET" "axis-get-brief"
+## STEP 5: Enable Amazon Bedrock (5 min + wait)
+> ⚠️ DO THIS FIRST — approval takes a few minutes
 
-DEB_ID=$(mk_resource "$API_ID" "$ROOT_ID" "debrief")
-DEB_P=$(mk_resource "$API_ID" "$DEB_ID" "{id}")
-mk_method "$API_ID" "$DEB_P" "POST" "axis-get-brief"
+1. Search **Bedrock** → click it
+2. Left sidebar → **Model access**
+3. Click **Modify model access** (top right)
+4. Find and check:
+   ```
+   ✓ Claude 3.5 Sonnet  (under Anthropic)
+   ✓ Claude 3 Sonnet    (under Anthropic) — backup
+   ```
+5. Click **Next** → **Submit**
+6. Status will say "In Progress" — **keep this tab open**, refresh every 2 minutes
+7. When it says **"Access granted"** → update WAR_ROOM.md ✅
 
-aws apigateway create-deployment --rest-api-id "$API_ID" \
-    --stage-name prod --region "$REGION" > /dev/null
+> While waiting, continue with Step 6
 
-API_URL="https://${API_ID}.execute-api.${REGION}.amazonaws.com/prod"
+---
 
-echo ""
-echo "==================================================="
-echo "  DEPLOYMENT COMPLETE"
-echo "==================================================="
-echo "  Bucket:   $BUCKET_NAME"
-echo "  API URL:  $API_URL"
-echo ""
-echo "  COPY THIS INTO App.js line 4:"
-echo "  const API_URL = '$API_URL';"
-echo "==================================================="
-```// filepath: ~/AWS-TAMU-26/deploy.sh
-#!/usr/bin/env bash
-set -euo pipefail
+## STEP 6: Lambda Functions (15 min)
+> Your backend code that runs in the cloud
 
-# Usage:
-#   ./deploy.sh                -> deploys to default region (us-east-1)
-#   ./deploy.sh us-west-2     -> deploys to provided region
-# Override repo root with REPO_ROOT env if needed
+**Go to Lambda → Create function**
 
-REPO_ROOT="${REPO_ROOT:-$HOME/AWS-TAMU-26}"
-REGION="${1:-${AWS_REGION:-us-east-1}}"
+### Lambda #1: axis-scraper
 
-echo "Repo root: $REPO_ROOT"
-echo "Region: $REGION"
+```
+Choose: Author from scratch
+Function name: axis-scraper
+Runtime: Python 3.12
+Architecture: x86_64
+Permissions: 
+  → Expand "Change default execution role"
+  → Use an existing role
+  → Select: axis-lambda-role
+→ Click Create function
+```
 
-# Ensure AWS CLI works
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-BUCKET_NAME="axis-interviews-${ACCOUNT_ID}"
+**Set timeout:**
+- Click **Configuration** tab → **General configuration** → Edit
+- Timeout: **0 min 30 sec**
+- Save
 
-echo "=== AXIS Deployment Starting ==="
-echo "Account: $ACCOUNT_ID | Bucket: $BUCKET_NAME | Region: $REGION"
+**Add code:**
+- Click **Code** tab
+- Delete ALL existing code
+- Open `backend/lambda_scraper/lambda_function.py` from the repo
+- Copy entire contents → paste into the Lambda editor
+- Click **Deploy** (orange button)
 
-# 1. IAM ROLE
-echo "--- Creating IAM role..."
-if aws iam get-role --role-name axis-lambda-role 2>/dev/null; then
-    ROLE_ARN=$(aws iam get-role --role-name axis-lambda-role --query 'Role.Arn' --output text)
-    echo "Role already exists: $ROLE_ARN"
-else
-    cat > /tmp/trust.json << 'TRUSTEOF'
-{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}
-TRUSTEOF
-    ROLE_ARN=$(aws iam create-role --role-name axis-lambda-role \
-        --assume-role-policy-document file:///tmp/trust.json \
-        --query 'Role.Arn' --output text)
-    for P in AmazonBedrockFullAccess AmazonS3FullAccess AmazonDynamoDBFullAccess AWSLambdaBasicExecutionRole; do
-        aws iam attach-role-policy --role-name axis-lambda-role \
-            --policy-arn "arn:aws:iam::aws:policy/$P"
-        echo "Attached $P"
-    done
-    echo "Waiting 15s for role to propagate..."
-    sleep 15
-fi
-echo "Role ARN: $ROLE_ARN"
+**Test it:**
+- Click **Test** tab → **Create new test event**
+- Event name: `test-heb`
+- Event JSON:
+  ```json
+  {
+    "company_name": "H-E-B",
+    "company_url": "https://www.heb.com"
+  }
+  ```
+- Click **Test** → Should return scraped content ✅
 
-# 2. S3 BUCKET
-echo "--- Creating S3 bucket..."
-if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
-    echo "Bucket $BUCKET_NAME already exists"
-else
-    if [ "$REGION" = "us-east-1" ]; then
-        aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION"
-    else
-        aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION" \
-            --create-bucket-configuration LocationConstraint="$REGION"
-    fi
-    aws s3api put-public-access-block --bucket "$BUCKET_NAME" \
-        --public-access-block-configuration \
-        BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
-    cat > /tmp/cors.json << 'CORSEOF'
-{"CORSRules":[{"AllowedHeaders":["*"],"AllowedMethods":["GET","PUT","POST","DELETE"],"AllowedOrigins":["*"],"ExposeHeaders":[]}]}
-CORSEOF
-    aws s3api put-bucket-cors --bucket "$BUCKET_NAME" --cors-configuration file:///tmp/cors.json
-    echo "Created bucket: $BUCKET_NAME"
-fi
+---
 
-# 3. DYNAMODB TABLES
-echo "--- Creating DynamoDB tables..."
-aws dynamodb describe-table --table-name axis-interviews --region "$REGION" 2>/dev/null || \
-    aws dynamodb create-table \
-        --table-name axis-interviews \
-        --attribute-definitions AttributeName=interview_id,AttributeType=S \
-        --key-schema AttributeName=interview_id,KeyType=HASH \
-        --billing-mode PAY_PER_REQUEST --region "$REGION" > /dev/null
-echo "axis-interviews ready"
+### Lambda #2: axis-pipeline
 
-aws dynamodb describe-table --table-name axis-institutional-memory --region "$REGION" 2>/dev/null || \
-    aws dynamodb create-table \
-        --table-name axis-institutional-memory \
-        --attribute-definitions \
-            AttributeName=sector,AttributeType=S \
-            AttributeName=interview_id,AttributeType=S \
-        --key-schema \
-            AttributeName=sector,KeyType=HASH \
-            AttributeName=interview_id,KeyType=RANGE \
-        --billing-mode PAY_PER_REQUEST --region "$REGION" > /dev/null
-echo "axis-institutional-memory ready"
+**Create new function:**
+```
+Function name: axis-pipeline
+Runtime: Python 3.12
+Permissions: Use existing role → axis-lambda-role
+→ Create function
+```
 
-# Helpers for Lambda deploy
-wait_for_lambda_ready() {
-    NAME=$1
-    # wait up to 5 minutes for LastUpdateStatus != InProgress
-    end=$((SECONDS+300))
-    while [ $SECONDS -lt $end ]; do
-        status=$(aws lambda get-function-configuration --function-name "$NAME" --region "$REGION" --query 'LastUpdateStatus' --output text 2>/dev/null || echo "None")
-        if [ "$status" != "InProgress" ]; then
-            break
-        fi
-        echo "Waiting for $NAME LastUpdateStatus -> $status"
-        sleep 2
-    done
-}
+**Set timeout:**
+- Configuration → General configuration → Edit
+- Timeout: **5 min 0 sec** ← CRITICAL
+- Memory: **512 MB**
+- Save
 
-safe_update_configuration() {
-    NAME=$1
-    shift
-    # try once, on ResourceConflict wait and retry once
-    if ! aws lambda update-function-configuration --function-name "$NAME" "$@" --region "$REGION" 2>/tmp/lcfg.err; then
-        echo "First update-config failed, retrying once..."
-        sleep 3
-        aws lambda update-function-configuration --function-name "$NAME" "$@" --region "$REGION"
-    fi
-}
+**Add code:**
+1. Open `backend/lambda_pipeline/lambda_function.py`
+2. Open `prompts/all_prompts.py`
+3. Copy each prompt string from all_prompts.py
+4. Paste into the corresponding prompt variable in lambda_function.py
+5. Change `BUCKET_NAME = 'axis-interviews-YOURTEAMNAME'` to your actual bucket name
+6. Copy entire file → paste into Lambda editor
+7. Click **Deploy**
 
-# 4. LAMBDA FUNCTIONS
-echo "--- Deploying Lambda functions..."
-deploy_lambda() {
-    NAME=$1; SRCFILE=$2; TIMEOUT=$3; MEMORY=$4
-    mkdir -p /tmp/lpkg
-    rm -rf /tmp/lpkg/*
-    cp "$REPO_ROOT/$SRCFILE" /tmp/lpkg/lambda_function.py
-    (cd /tmp/lpkg && zip -q lambda.zip lambda_function.py)
-    if aws lambda get-function --function-name "$NAME" --region "$REGION" 2>/dev/null; then
-        aws lambda update-function-code --function-name "$NAME" \
-            --zip-file fileb:///tmp/lpkg/lambda.zip --region "$REGION"
-        wait_for_lambda_ready "$NAME"
-    else
-        aws lambda create-function \
-            --function-name "$NAME" --runtime python3.12 \
-            --role "$ROLE_ARN" \
-            --handler lambda_function.lambda_handler \
-            --zip-file fileb:///tmp/lpkg/lambda.zip \
-            --timeout "$TIMEOUT" --memory-size "$MEMORY" \
-            --region "$REGION"
-        wait_for_lambda_ready "$NAME"
-    fi
+**Test it:**
+- Test event:
+  ```json
+  {
+    "company_name": "H-E-B",
+    "scraped_content": "H-E-B is a Texas grocery chain founded in 1905 in San Antonio. Charles Butt is CEO. They have about 100,000 employees.",
+    "tamu_notes": ""
+  }
+  ```
+- Click Test → Should take 60-90 seconds → Returns brief ✅
 
-    # Set bucket env var for pipeline and get-brief
-    if [ "$NAME" = "axis-pipeline" ] || [ "$NAME" = "axis-get-brief" ]; then
-        safe_update_configuration "$NAME" --environment "Variables={BUCKET_NAME=$BUCKET_NAME}"
-    fi
+---
 
-    echo "Deployed $NAME"
-    cd "$REPO_ROOT"
-}
+### Lambda #3: axis-interviewee
 
-deploy_lambda "axis-scraper"     "backend/lambda_scraper/lambda_function.py"    30  128
-deploy_lambda "axis-pipeline"    "backend/lambda_pipeline/lambda_function.py"   300 512
-deploy_lambda "axis-interviewee" "backend/lambda_interviewee/lambda_function.py" 30 128
-deploy_lambda "axis-get-brief"   "backend/lambda_debrief/lambda_function.py"    30  128
+```
+Function name: axis-interviewee
+Runtime: Python 3.12
+Permissions: axis-lambda-role
+Timeout: 30 seconds
+```
 
-# 5. API GATEWAY
-echo "--- Creating API Gateway..."
-EXISTING=$(aws apigateway get-rest-apis --region "$REGION" \
-    --query "items[?name=='axis-api'].id" --output text 2>/dev/null || echo "")
-if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
-    API_ID=$EXISTING
-    echo "axis-api already exists: $API_ID"
-else
-    API_ID=$(aws apigateway create-rest-api --name axis-api \
-        --endpoint-configuration types=REGIONAL \
-        --region "$REGION" --query 'id' --output text)
-    echo "Created API: $API_ID"
-fi
+Code: copy from `backend/lambda_interviewee/lambda_function.py`
 
-ROOT_ID=$(aws apigateway get-resources --rest-api-id "$API_ID" \
-    --region "$REGION" --query "items[?path=='/'].id" --output text)
+---
 
-mk_resource() {
-    EXISTING=$(aws apigateway get-resources --rest-api-id "$1" --region "$REGION" \
-        --query "items[?pathPart=='$3'&&parentId=='$2'].id" --output text 2>/dev/null || echo "")
-    if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then echo "$EXISTING"
-    else aws apigateway create-resource --rest-api-id "$1" --parent-id "$2" \
-        --path-part "$3" --region "$REGION" --query 'id' --output text; fi
-}
+### Lambda #4: axis-get-brief
 
-mk_method() {
-    API=$1; RES=$2; METHOD=$3; FUNC=$4
-    URI="arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:${FUNC}/invocations"
-    aws apigateway put-method --rest-api-id "$API" --resource-id "$RES" \
-        --http-method "$METHOD" --authorization-type NONE \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws apigateway put-integration --rest-api-id "$API" --resource-id "$RES" \
-        --http-method "$METHOD" --type AWS_PROXY \
-        --integration-http-method POST --uri "$URI" \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws lambda add-permission --function-name "$FUNC" \
-        --statement-id "apigw-${RES}-${METHOD}-$$" \
-        --action lambda:InvokeFunction --principal apigateway.amazonaws.com \
-        --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API}/*/*" \
-        --region "$REGION" > /dev/null 2>&1 || true
-    # CORS OPTIONS
-    aws apigateway put-method --rest-api-id "$API" --resource-id "$RES" \
-        --http-method OPTIONS --authorization-type NONE \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws apigateway put-integration --rest-api-id "$API" --resource-id "$RES" \
-        --http-method OPTIONS --type MOCK \
-        --request-templates '{"application/json":"{\"statusCode\":200}"}' \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws apigateway put-method-response --rest-api-id "$API" --resource-id "$RES" \
-        --http-method OPTIONS --status-code 200 \
-        --response-parameters '{"method.response.header.Access-Control-Allow-Headers":false,"method.response.header.Access-Control-Allow-Methods":false,"method.response.header.Access-Control-Allow-Origin":false}' \
-        --region "$REGION" > /dev/null 2>&1 || true
-    aws apigateway put-integration-response --rest-api-id "$API" --resource-id "$RES" \
-        --http-method OPTIONS --status-code 200 \
-        --response-parameters "{\"method.response.header.Access-Control-Allow-Headers\":\"'Content-Type'\",\"method.response.header.Access-Control-Allow-Methods\":\"'GET,POST,OPTIONS'\",\"method.response.header.Access-Control-Allow-Origin\":\"'*'\"}" \
-        --region "$REGION" > /dev/null 2>&1 || true
-}
+```
+Function name: axis-get-brief
+Runtime: Python 3.12
+Permissions: axis-lambda-role
+Timeout: 30 seconds
+```
 
-SCRAPE_ID=$(mk_resource "$API_ID" "$ROOT_ID" "scrape")
-mk_method "$API_ID" "$SCRAPE_ID" "POST" "axis-scraper"
+Code: copy from `backend/lambda_debrief/lambda_function.py`
+Change BUCKET_NAME to your actual bucket name.
 
-GEN_ID=$(mk_resource "$API_ID" "$ROOT_ID" "generate")
-mk_method "$API_ID" "$GEN_ID" "POST" "axis-pipeline"
+---
 
-BRIEF_ID=$(mk_resource "$API_ID" "$ROOT_ID" "brief")
-BRIEF_P=$(mk_resource "$API_ID" "$BRIEF_ID" "{id}")
-mk_method "$API_ID" "$BRIEF_P" "GET" "axis-get-brief"
+## STEP 7: API Gateway (10 min)
+> Creates the URLs your frontend calls
 
-DEB_ID=$(mk_resource "$API_ID" "$ROOT_ID" "debrief")
-DEB_P=$(mk_resource "$API_ID" "$DEB_ID" "{id}")
-mk_method "$API_ID" "$DEB_P" "POST" "axis-get-brief"
+1. Search **API Gateway** → click it
+2. Click **Create API**
+3. Choose **REST API** → **Build**
+4. Configure:
+   ```
+   Protocol: REST
+   Create new API: New API
+   API name: axis-api
+   Endpoint Type: Regional
+   → Create API
+   ```
 
-aws apigateway create-deployment --rest-api-id "$API_ID" \
-    --stage-name prod --region "$REGION" > /dev/null
+**Create resources and methods:**
 
-API_URL="https://${API_ID}.execute-api.${REGION}.amazonaws.com/prod"
+For each endpoint below:
+- Select the parent resource in the tree
+- Actions → Create Resource → fill in name → ✓ Enable CORS → Create Resource
+- Select the new resource → Actions → Create Method → select method → ✓
+- Integration type: Lambda Function → select the Lambda → Save → OK
 
-echo ""
-echo "==================================================="
-echo "  DEPLOYMENT COMPLETE"
-echo "==================================================="
-echo "  Bucket:   $BUCKET_NAME"
-echo "  API URL:  $API_URL"
-echo ""
-echo "  COPY THIS INTO App.js line 4:"
-echo "  const API_URL = '$API_URL';"
+| Resource | Method | Lambda |
+|----------|--------|--------|
+| /scrape | POST | axis-scraper |
+| /generate | POST | axis-pipeline |
+| /brief/{id} | GET | axis-get-brief |
+| /interviewee/{id} | POST | axis-interviewee |
+
+**For path parameters like {id}:**
+- Resource name: `{id}`
+- This creates a path parameter
+
+**Enable CORS on everything:**
+- Click each resource
+- Actions → Enable CORS
+- Replace existing CORS headers → Yes, replace
+
+**Deploy:**
+- Actions → Deploy API
+- Deployment stage: [New Stage]
+- Stage name: `prod`
+- → Deploy
+
+**COPY THE INVOKE URL** → paste into WAR_ROOM.md
+Looks like: `https://abc123xyz.execute-api.us-east-1.amazonaws.com/prod`
+
+---
+
+## STEP 8: Amplify Frontend (5 min)
+> Hosts your React web application
+
+**On someone's laptop (must have Node.js installed):**
+
+```bash
+# If not already done:
+npx create-react-app axis-frontend
+cd axis-frontend
+npm install axios react-router-dom
+
+# Replace src/App.js with contents of frontend/src/App.js from repo
+# IMPORTANT: Change API_URL at top of App.js to your API Gateway URL
+
+npm run build
+```
+
+**In AWS Console:**
+1. Search **Amplify** → click it
+2. **Create new app**
+3. Choose **Deploy without Git**
+4. App name: `axis-frontend`
+5. Drag and drop your **build** folder
+6. Click **Save and deploy**
+7. Wait ~2 minutes → copy your Amplify URL → WAR_ROOM.md ✅
+
+---
+
+## Final Integration Check
+
+Go through WAR_ROOM.md integration checklist:
+```
+[ ] Open Amplify URL — see the AXIS home page
+[ ] Type "H-E-B" and click Generate
+[ ] Wait 60-90 seconds — brief should appear
+[ ] Copy interviewee link — open in new tab
+[ ] Toggle facts, select questions, submit
+[ ] Return to brief page — should show "Interviewee responded"
+```
+
+If all checked: 🎉 You're ready to demo.
