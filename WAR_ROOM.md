@@ -24,7 +24,7 @@ Policies:       AmazonBedrockFullAccess ✓  AmazonS3FullAccess ✓
 
 ## S3
 ```
-Bucket Name:    axis-interviews-[YOURTEAMNAME]
+Bucket Name:    axis-interviews-team21
 CORS:           ✓ Configured
 ```
 
@@ -49,7 +49,7 @@ Status:    [ ] Requested   [ ] GRANTED ← pipeline won't work until granted
 
 ## Lambda Functions
 ```
-axis-scraper        Timeout: 30s      [ ] Deployed  [ ] Tested
+axis-scraper        Timeout: 30s      [✓] Deployed  [✓] Tested
 axis-pipeline       Timeout: 300s     [ ] Deployed  [ ] Tested (use GridFlex)
                     Memory: 512MB
                     BUCKET_NAME: updated ✓
