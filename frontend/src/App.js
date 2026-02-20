@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 
-// ⚠️ CHANGE THIS to your API Gateway URL after deploying
-const API_URL = 'YOUR_API_GATEWAY_URL_HERE';
+const API_URL = 'https://pt9x0911sc.execute-api.us-west-2.amazonaws.com/prod';
 
 // Inject Google Fonts
 const fontLink = document.createElement('link');
@@ -147,27 +146,33 @@ function Home() {
       },i*2000);
     });
     try {
-      const sr=await axios.post(`${API_URL}/scrape`,{
-        company_name:company,
-        company_url:url,
-        interviewee_name:intervieweeName,
-        interviewee_title:intervieweeTitle,
-        sector:sector
-      });
-      const sd=typeof sr.data==='string'?JSON.parse(sr.data):sr.data;
-      const scraped=sd.body?JSON.parse(sd.body).scraped_content:(sd.scraped_content||`Company: ${company}`);
-      const r=await axios.post(`${API_URL}/generate`,{
-        company_name:company,
-        scraped_content:scraped,
-        tamu_notes:notes,
-        interviewee_name:intervieweeName,
-        interviewee_title:intervieweeTitle,
-        sector:sector
-      });
-      const rd=typeof r.data==='string'?JSON.parse(r.data):r.data;
-      const result=rd.body?JSON.parse(rd.body):rd;
-      navigate(`/brief/${result.interview_id}`,{state:{intervieweeName,intervieweeTitle,sector,company}});
-    } catch(err){ console.error(err); alert('Generation failed — check console and Lambda logs.'); setLoading(false); }
+      const scrapeBody = { company, website: url, intervieweeName, intervieweeTitle, sector };
+      const scrapeUrl = `${API_URL}/scrape`;
+      console.log('[AXIS API] POST', scrapeUrl, scrapeBody);
+      const sr = await axios.post(scrapeUrl, scrapeBody);
+      const sd = typeof sr.data === 'string' ? JSON.parse(sr.data) : sr.data;
+      const scraped = sd.body ? JSON.parse(sd.body).scraped_content : (sd.scraped_content || `Company: ${company}`);
+      const generateBody = { company_name: company, scraped_content: scraped, tamu_notes: notes, interviewee_name: intervieweeName, interviewee_title: intervieweeTitle, sector };
+      const generateUrl = `${API_URL}/generate`;
+      console.log('[AXIS API] POST', generateUrl, generateBody);
+      const r = await axios.post(generateUrl, generateBody);
+      const rd = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+      const result = rd.body ? JSON.parse(rd.body) : rd;
+      navigate(`/brief/${result.interview_id}`, { state: { intervieweeName, intervieweeTitle, sector, company } });
+    } catch (err) {
+      console.error(err);
+      const status = err.response?.status;
+      const is4xx = status >= 400 && status < 500;
+      if (is4xx && err.response?.data != null) {
+        const msg = typeof err.response.data === 'string' ? err.response.data : (err.response.data?.message || err.response.data?.error || JSON.stringify(err.response.data));
+        alert(`Request failed (${status}): ${msg}`);
+      } else if (is4xx) {
+        alert(`Request failed (${status}): ${err.response?.statusText || 'Client error'}`);
+      } else {
+        alert('Generation failed — check console and Lambda logs.');
+      }
+      setLoading(false);
+    }
   };
 
   if(loading) return(
@@ -255,7 +260,25 @@ function Brief() {
   const [showResponseModal,setShowResponseModal]=useState(false);
   
   const load=useCallback(async()=>{
-    try{const r=await axios.get(`${API_URL}/brief/${id}`);const rd=typeof r.data==='string'?JSON.parse(r.data):r.data;setData(rd.body?JSON.parse(rd.body):rd);}catch(e){console.error(e);}
+    const url=`${API_URL}/brief/${id}`;
+    console.log('[AXIS API] GET', url);
+    try {
+      const r=await axios.get(url);
+      const rd=typeof r.data==='string'?JSON.parse(r.data):r.data;
+      setData(rd.body?JSON.parse(rd.body):rd);
+    } catch(e){
+      console.error(e);
+      const status=e.response?.status;
+      const is4xx=status>=400&&status<500;
+      if(is4xx&&e.response?.data!=null){
+        const msg=typeof e.response.data==='string'?e.response.data:(e.response.data?.message||e.response.data?.error||JSON.stringify(e.response.data));
+        alert(`Failed to load brief (${status}): ${msg}`);
+      } else if(is4xx){
+        alert(`Failed to load brief (${status}): ${e.response?.statusText||'Client error'}`);
+      } else {
+        alert('Failed to load brief — check console and network.');
+      }
+    }
   },[id]);
   useEffect(()=>{load();},[load]);
   
@@ -571,23 +594,38 @@ function PostInterviewDebrief({interviewId,companyName,intervieweeName,interview
   const save=async()=>{
     if(!insights.trim()) return alert('Please add at least one key insight.');
     setSaving(true);
+    const body={
+      what_ai_got_wrong:wrong,
+      key_insights:insights,
+      questions_that_worked:goodQs.split('\n').filter(q=>q.trim()),
+      surprises,
+      sector:sector||'general',
+      company_name:companyName||'',
+      interviewee_name:intervieweeName||'',
+      interviewee_title:intervieweeTitle||'',
+      interview_date:interviewDate,
+      question_ratings:questionRatings,
+      completed_schema:schema||{}
+    };
+    const url=`${API_URL}/debrief/${interviewId}`;
+    console.log('[AXIS API] POST', url, body);
     try{
-      await axios.post(`${API_URL}/debrief/${interviewId}`,{
-        what_ai_got_wrong:wrong,
-        key_insights:insights,
-        questions_that_worked:goodQs.split('\n').filter(q=>q.trim()),
-        surprises,
-        sector:sector||'general',
-        company_name:companyName||'',
-        interviewee_name:intervieweeName||'',
-        interviewee_title:intervieweeTitle||'',
-        interview_date:interviewDate,
-        question_ratings:questionRatings,
-        completed_schema:schema||{}
-      });
+      await axios.post(url, body);
       setSaved(true);
       if(onComplete) onComplete();
-    }catch(e){console.error(e);alert('Save failed.');}finally{setSaving(false);}
+    }catch(e){
+      console.error(e);
+      const status=e.response?.status;
+      const is4xx=status>=400&&status<500;
+      if(is4xx&&e.response?.data!=null){
+        const msg=typeof e.response.data==='string'?e.response.data:(e.response.data?.message||e.response.data?.error||JSON.stringify(e.response.data));
+        alert(`Save failed (${status}): ${msg}`);
+      } else if(is4xx){
+        alert(`Save failed (${status}): ${e.response?.statusText||'Client error'}`);
+      } else {
+        alert('Save failed.');
+      }
+    }finally{setSaving(false);}
   };
 
   if(saved) return(
@@ -662,14 +700,31 @@ function IntervieweeMicrosite(){
   
   const handleSubmit=async()=>{
     setSubmitting(true);
+    const body={
+      company:payload.company,
+      fact_responses:payload.facts.map((f,i)=>({fact:f,accurate:factStates[i],correction:corrections[i]||''})),
+      question_interests:payload.questions.map((q,i)=>({question:q.text,interested:questionStates[i]}))
+    };
+    const url=`${API_URL}/interviewee`;
+    console.log('[AXIS API] POST', url, body);
     try{
-      await axios.post(`${API_URL}/interviewee`,{
-        company:payload.company,
-        fact_responses:payload.facts.map((f,i)=>({fact:f,accurate:factStates[i],correction:corrections[i]||''})),
-        question_interests:payload.questions.map((q,i)=>({question:q.text,interested:questionStates[i]}))
-      });
+      await axios.post(url, body);
+      setSubmitting(false);
       setSubmitted(true);
-    }catch(e){console.error(e);alert('Submission failed.');setSubmitting(false);}
+    }catch(e){
+      console.error(e);
+      const status=e.response?.status;
+      const is4xx=status>=400&&status<500;
+      if(is4xx&&e.response?.data!=null){
+        const msg=typeof e.response.data==='string'?e.response.data:(e.response.data?.message||e.response.data?.error||JSON.stringify(e.response.data));
+        alert(`Submission failed (${status}): ${msg}`);
+      } else if(is4xx){
+        alert(`Submission failed (${status}): ${e.response?.statusText||'Client error'}`);
+      } else {
+        alert('Submission failed.');
+      }
+      setSubmitting(false);
+    }
   };
   
   if(!payload) return <div style={S.loadingScreen}><div className="bg-blob bg-blob-1"></div><div className="bg-blob bg-blob-2"></div><div style={S.loadingCard}><div style={S.spinner}/><p style={{color:'var(--text-secondary)',marginTop:20}}>Loading...</p></div></div>;
@@ -736,9 +791,24 @@ function IntervieweePage(){
   const {id}=useParams();
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true);
   useEffect(()=>{
-    axios.get(`${API_URL}/brief/${id}`)
+    const url=`${API_URL}/brief/${id}`;
+    console.log('[AXIS API] GET', url);
+    axios.get(url)
       .then(r=>{const rd=typeof r.data==='string'?JSON.parse(r.data):r.data;setData(rd.body?JSON.parse(rd.body):rd);})
-      .catch(console.error).finally(()=>setLoading(false));
+      .catch(e=>{
+        console.error(e);
+        const status=e.response?.status;
+        const is4xx=status>=400&&status<500;
+        if(is4xx&&e.response?.data!=null){
+          const msg=typeof e.response.data==='string'?e.response.data:(e.response.data?.message||e.response.data?.error||JSON.stringify(e.response.data));
+          alert(`Failed to load (${status}): ${msg}`);
+        } else if(is4xx){
+          alert(`Failed to load (${status}): ${e.response?.statusText||'Client error'}`);
+        } else {
+          alert('Failed to load — check console and network.');
+        }
+      })
+      .finally(()=>setLoading(false));
   },[id]);
 
   if(loading) return(<div style={S.loadingScreen}><div className="bg-blob bg-blob-1"></div><div className="bg-blob bg-blob-2"></div><div style={S.loadingCard}><div style={S.spinner}/><p style={{color:'var(--text-secondary)',marginTop:20}}>Loading...</p></div></div>);
