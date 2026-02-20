@@ -1,9 +1,9 @@
-# ⚡ AXIS — Adaptive Interview Intelligence
+# AXIS — Adaptive Interview Intelligence
 ### Texas A&M Hackathon 2026 | Team War Room
 
 ---
 
-## 🚨 First 30 Minutes Tomorrow (READ THIS FIRST)
+## First 30 Minutes Tomorrow (READ THIS FIRST)
 
 ```
 1. Get QR code → ONE person logs into AWS
@@ -15,7 +15,7 @@
 
 ---
 
-## 👥 Team Assignments
+##  Team Assignments
 
 | Person | Role | Folder | First Task at 10AM |
 |--------|------|--------|--------------------|
@@ -27,7 +27,7 @@
 
 ---
 
-## 📁 Repo Structure
+##  Repo Structure
 
 ```
 AXIS/
@@ -64,25 +64,25 @@ AXIS/
 
 ---
 
-## ⏱ Tomorrow's Build Timeline
+## Tomorrow's Build Timeline
 
 ```
 08:30  Get credentials → fill WAR_ROOM.md
 08:45  Listen to Levi (Person 3 starts IAM setup quietly)
 09:00  Ask prepared Q&A questions (see presentation/qa_questions.md)
 09:30  Watch AWS demo for shortcuts
-10:00  🚀 BUILD STARTS — everyone knows their job
+10:00  BUILD STARTS — everyone knows their job
 12:00  Lunch check-in: what's working, what do we cut?
 01:00  Core pipeline must be working by now
 02:00  Frontend + interviewee microsite done
 02:30  Full integration test with H-E-B
-03:00  🛑 STOP BUILDING — practice presentation only
+03:00  STOP BUILDING — practice presentation only
 03:30  Present and win
 ```
 
 ---
 
-## 🏆 Demo Company: H-E-B Grocery
+##  Demo Company: H-E-B Grocery
 
 **Pre-load this before the demo so you're not waiting live:**
 - Company: H-E-B Grocery Company
@@ -96,7 +96,7 @@ AXIS/
 
 ---
 
-## 🆘 If Things Break
+## If Things Break
 
 See `presentation/backup_plan.md` — record a screen video tonight as insurance.
 
