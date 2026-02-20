@@ -65,7 +65,7 @@ axis-get-brief      Timeout: 30s      [ ] Deployed
 ```
 API Name:   axis-api
 Stage:      prod
-Invoke URL: [PASTE HERE → goes into App.js line 4]
+Invoke URL: https://pt9x0911sc.execute-api.us-west-2.amazonaws.com
 
 POST /scrape           [ ] Created  [ ] Tested
 POST /generate         [ ] Created  [ ] Tested
