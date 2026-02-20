@@ -1,518 +1,543 @@
-# AWS Workshop Studio — Complete Setup Guide
-### Written specifically for AWS-provided hackathon accounts
+# AXIS — AWS Workshop Studio Setup Guide
+### Using the browser-based VSCode with SAM CLI pre-installed
 
-> ⚠️ ONE PERSON shares screen and does all AWS setup.
-> Everyone else watches and updates WAR_ROOM.md with every value created.
-> Estimated total time: 45 minutes
-
----
-
-## PART 0: Accessing Your Workshop Account (First 5 Minutes)
-
-### Step 1: Open the Workshop Portal
-1. Go to **https://catalog.workshops.aws**
-2. Click **"Get started"** or **"Sign in"**
-3. You will see a QR code or a 12-character event access code on your hackathon check-in sheet
-4. Enter the event code OR scan the QR code
-5. Click **"Accept Terms & Login"**
-6. Click **"Open AWS Console"**
-
-> ⚠️ You will land directly inside a pre-provisioned AWS account.
-> You do NOT need to create an account or enter a credit card.
-> The account has a spending limit set by the organizers.
-
-### Step 2: Verify You're In the Right Account
-Once the AWS Console opens:
-- Top right corner shows an account name like **"WSParticipantRole"** or **"TeamRole"**
-- This is normal — it's your workshop account
-- **DO NOT** try to log in with a personal AWS account
-
-### Step 3: Set Your Region — Do This Before Anything Else
-1. Top-right corner — click the region dropdown (shows current region name)
-2. Select **US East (N. Virginia) — us-east-1**
-3. Page reloads — confirm it shows **N. Virginia** in the top right
-4. ✅ Every service you create must be in this region
-
-### Step 4: Check What's Pre-Provisioned
-Some workshop accounts come with services already set up.
-Before creating anything, quickly check:
-
-- Search **IAM** → Roles → look for any role with "axis", "lambda", or "workshop" in the name
-- Search **S3** → check if any buckets already exist
-- Search **Bedrock** → Model access → check if Claude models are already approved
-
-**Paste anything you find into WAR_ROOM.md immediately.**
-If Claude models are already approved, skip the Bedrock step below — saves 5 minutes.
+> This guide uses the terminal inside your workshop VSCode — no AWS Console
+> clicking required. Run the scripts and everything deploys automatically.
+> Estimated time: 30 minutes total.
 
 ---
 
-## PART 1: IAM Role (5 minutes)
-> This gives your Lambda functions permission to call Bedrock, S3, and DynamoDB.
+## STEP 0: Access the Workshop VSCode Environment
 
-1. Search **IAM** in top search bar → click **IAM**
-2. Left sidebar → **Roles** → **Create role** (orange button, top right)
-
-**Page 1 — Select trusted entity:**
-```
-Trusted entity type: AWS service
-Use case: Lambda
-→ Click Next
-```
-
-**Page 2 — Add permissions:**
-Search and check each one:
-```
-✓ AmazonBedrockFullAccess
-✓ AmazonS3FullAccess
-✓ AmazonDynamoDBFullAccess
-✓ AWSLambdaBasicExecutionRole
-✓ AmazonSESFullAccess
-→ Click Next
-```
-
-**Page 3 — Name and create:**
-```
-Role name: axis-lambda-role
-→ Click Create role
-```
-
-**After creation:**
-- Click **axis-lambda-role** in the list
-- Copy the **ARN** at the top (looks like `arn:aws:iam::123456789012:role/axis-lambda-role`)
-- Paste into WAR_ROOM.md
-
-> ⚠️ Workshop accounts sometimes restrict IAM. If you get a permissions error:
-> Look for an existing role like "LabRole" or "WSParticipantRole" in the Roles list.
-> Use that role instead — it usually already has broad permissions.
-> Just update the role name in WAR_ROOM.md.
+1. In AWS Console → search **CloudFormation**
+2. Click the stack named **code-server-stack** → **Outputs** tab
+3. Find two values:
+   - `CodeServerCloudFrontDomainName` → your VSCode URL
+   - `CodeServerPassWord` → your password (usually your AWS Account ID)
+4. Open the CloudFront URL in a new browser tab
+5. Enter the password → VSCode opens in your browser
 
 ---
 
-## PART 2: S3 Bucket (5 minutes)
-> Stores all generated briefs, emails, and schemas.
+## STEP 1: Open a Terminal in VSCode
 
-1. Search **S3** → **Create bucket** (orange button)
-
-**Configure:**
-```
-Bucket name: axis-interviews-[your-team-name]
-  (Must be globally unique — add numbers if it says name already taken)
-AWS Region: us-east-1
-```
-
-**Block Public Access:**
-```
-UNCHECK "Block all public access"
-✓ Check the acknowledgment box that appears
-```
-
-Everything else — leave as default → **Create bucket**
-
-**Add CORS (required for frontend):**
-- Click your bucket name → **Permissions** tab
-- Scroll to **Cross-origin resource sharing (CORS)** → **Edit**
-- Paste this exactly:
-
-```json
-[
-    {
-        "AllowedHeaders": ["*"],
-        "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
-        "AllowedOrigins": ["*"],
-        "ExposeHeaders": []
-    }
-]
-```
-- **Save changes**
-- Paste bucket name into WAR_ROOM.md ✅
+- Click **Terminal** → **New Terminal**
+- You have a full Linux terminal inside your browser
 
 ---
 
-## PART 3: DynamoDB Tables (5 minutes)
-> Your database for interviews and institutional memory.
+## STEP 2: Verify Pre-installed Tools
 
-1. Search **DynamoDB** → Left sidebar → **Tables** → **Create table**
-
-**Table 1:**
-```
-Table name:      axis-interviews
-Partition key:   interview_id    (type: String)
-Sort key:        leave empty
-Settings:        Default settings
-→ Create table
-→ Wait ~30 seconds until Status = Active
-```
-
-**Table 2:** Click Create table again:
-```
-Table name:      axis-institutional-memory
-Partition key:   sector          (type: String)
-Sort key:        interview_id    (type: String)
-Settings:        Default settings
-→ Create table
-```
-
-Both tables confirmed in WAR_ROOM.md ✅
-
----
-
-## PART 4: Amazon Bedrock — Request Model Access (5 min + wait)
-> ⚠️ DO THIS IMMEDIATELY — approval can take 2-5 minutes.
-> Request it now, continue setup while you wait.
-
-1. Search **Bedrock** → click **Amazon Bedrock**
-2. Left sidebar → **Model access** (scroll down to find it)
-3. Click **Modify model access** (top right button)
-4. Find **Anthropic** section — check both:
-   ```
-   ✓ Claude 3.5 Sonnet
-   ✓ Claude 3 Sonnet    ← backup
-   ```
-5. Click **Next** → **Submit**
-6. Status shows "In Progress" — **keep this tab open**
-7. Refresh every 2 minutes until it says **"Access granted" ✅**
-
-> ⚠️ Workshop accounts sometimes have Bedrock pre-approved.
-> If you see "Access granted" already — skip this step entirely.
-
-> ⚠️ If you don't see a "Modify model access" button:
-> The workshop account may have a different Bedrock setup.
-> Ask an AWS engineer at the hackathon — this is a common workshop config question.
-
----
-
-## PART 5: Lambda Functions (20 minutes)
-> Your backend code that runs in the cloud. Create 4 functions.
-
-### How to Create Each Lambda (same steps for all 4):
-
-**Go to Lambda:**
-1. Search **Lambda** → **Create function**
-2. Choose **"Author from scratch"**
-3. Fill in the config (see each function below)
-4. Under **Permissions** → expand **"Change default execution role"**
-   → Select **"Use an existing role"**
-   → Choose **axis-lambda-role** (or the workshop LabRole if IAM was restricted)
-5. Click **Create function**
-6. Paste code from the repo
-7. Click **Deploy** (orange button in code editor)
-8. Set timeout in **Configuration** tab
-
----
-
-### Lambda #1: axis-scraper
-
-**Create with:**
-```
-Function name: axis-scraper
-Runtime:       Python 3.12
-Architecture:  x86_64
-Role:          axis-lambda-role
-```
-
-**Set timeout:**
-- Configuration tab → General configuration → Edit
-- Timeout: **0 min 30 sec** → Save
-
-**Add code:**
-- Code tab → delete all existing code
-- Open `backend/lambda_scraper/lambda_function.py` from the repo
-- Copy entire contents → paste → **Deploy**
-
-**Test it:**
-- Test tab → Create new test event
-- Event name: `test-gridflex`
-- JSON:
-```json
-{
-  "company_name": "GridFlex Energy",
-  "company_url": "https://www.gridflex.com"
-}
-```
-- Click **Test** → should return scraped content within 30 seconds ✅
-
----
-
-### Lambda #2: axis-pipeline (Most Important)
-
-**Create with:**
-```
-Function name: axis-pipeline
-Runtime:       Python 3.12
-Architecture:  x86_64
-Role:          axis-lambda-role
-```
-
-**Set timeout and memory — CRITICAL:**
-- Configuration → General configuration → Edit
-- Timeout: **5 min 0 sec**
-- Memory: **512 MB**
-- Save
-
-**Add code (3 steps):**
-
-Step 1: Open `backend/lambda_pipeline/lambda_function.py` from repo
-
-Step 2: Open `prompts/all_prompts.py` from repo in a separate tab
-
-Step 3: In the pipeline file, find these 6 placeholder lines:
-```python
-SYNTHESIS_PROMPT = """[PASTE SYNTHESIS_PROMPT HERE]"""
-TEXAS_PROMPT = """[PASTE TEXAS_PROMPT HERE]"""
-QUESTIONS_PROMPT = """[PASTE QUESTIONS_PROMPT HERE]"""
-GAPS_PROMPT = """[PASTE GAPS_PROMPT HERE]"""
-ASSEMBLY_PROMPT = """[PASTE ASSEMBLY_PROMPT HERE]"""
-SCHEMA_PROMPT = """[PASTE SCHEMA_PROMPT HERE]"""
-```
-
-Replace each `[PASTE X HERE]` with the actual prompt string from all_prompts.py
-(copy from the triple-quote start to the triple-quote end for each prompt)
-
-Step 4: Change the bucket name:
-```python
-# Find this line:
-BUCKET_NAME = 'axis-interviews-YOURTEAMNAME'
-# Change to your actual bucket name:
-BUCKET_NAME = 'axis-interviews-[your-team-name]'
-```
-
-Step 5: Paste entire file → **Deploy**
-
-**Test it:**
-```json
-{
-  "company_name": "GridFlex Energy",
-  "scraped_content": "GridFlex Energy is a Texas-based virtual power plant company operating in the ERCOT market. They work with residential battery systems and solar installations. Based in Texas.",
-  "tamu_notes": ""
-}
-```
-Click Test → takes 60-90 seconds → should return a brief with interview_id ✅
-
----
-
-### Lambda #3: axis-interviewee
-
-**Create with:**
-```
-Function name: axis-interviewee
-Runtime:       Python 3.12
-Timeout:       30 seconds
-Role:          axis-lambda-role
-```
-
-Code: copy from `backend/lambda_interviewee/lambda_function.py` → Deploy ✅
-
----
-
-### Lambda #4: axis-get-brief
-
-**Create with:**
-```
-Function name: axis-get-brief
-Runtime:       Python 3.12
-Timeout:       30 seconds
-Role:          axis-lambda-role
-```
-
-Code: copy from `backend/lambda_debrief/lambda_function.py`
-
-**Change bucket name before deploying:**
-```python
-BUCKET_NAME = 'axis-interviews-[your-team-name]'
-```
-
-Deploy ✅
-
----
-
-## PART 6: API Gateway (10 minutes)
-> Creates the HTTPS URLs your frontend calls.
-
-1. Search **API Gateway** → **Create API**
-2. Choose **REST API** → **Build**
-
-```
-Protocol:         REST
-Create new API:   New API
-API name:         axis-api
-Endpoint Type:    Regional
-→ Create API
-```
-
-### Create the 4 Endpoints
-
-For each endpoint, the pattern is:
-> Root (/) → Create Resource → Create Method → Link to Lambda
-
-**Endpoint 1: POST /scrape**
-- Click "/" in the resource tree
-- Actions → Create Resource
-  ```
-  Resource Name: scrape
-  ✓ Enable API Gateway CORS
-  → Create Resource
-  ```
-- With /scrape selected → Actions → Create Method → POST → ✓
-  ```
-  Integration type: Lambda Function
-  Lambda Region: us-east-1
-  Lambda Function: axis-scraper
-  → Save → OK (grant permission popup)
-  ```
-
-**Endpoint 2: POST /generate**
-- Click "/" → Actions → Create Resource
-  ```
-  Resource Name: generate
-  ✓ Enable API Gateway CORS
-  ```
-- /generate → Create Method → POST → Lambda: axis-pipeline
-
-**Endpoint 3: GET /brief/{id}**
-- Click "/" → Create Resource → name: `brief`
-- Click /brief → Create Resource
-  ```
-  Resource Name: {id}
-  Resource Path: {id}
-  ✓ Enable API Gateway CORS
-  ```
-- Click /{id} → Create Method → GET → Lambda: axis-get-brief
-
-**Endpoint 4: POST /debrief/{id}**
-- Click "/" → Create Resource → name: `debrief`
-- Click /debrief → Create Resource → name: `{id}` ✓ Enable CORS
-- Click /{id} → Create Method → POST → Lambda: axis-get-brief
-  (same Lambda handles both GET brief and POST debrief)
-
-### Enable CORS on Everything
-For each resource (/scrape, /generate, /brief/{id}, /debrief/{id}):
-- Click the resource
-- Actions → Enable CORS
-- Click **Enable CORS and replace existing CORS headers**
-- Click **Yes, replace existing values**
-
-### Deploy the API
-- Actions → Deploy API
-  ```
-  Deployment stage: [New Stage]
-  Stage name: prod
-  → Deploy
-  ```
-- **COPY THE INVOKE URL** → paste into WAR_ROOM.md immediately
-- Looks like: `https://abc123xyz.execute-api.us-east-1.amazonaws.com/prod`
-
----
-
-## PART 7: Frontend on Amplify (10 minutes)
-
-### On one team member's laptop:
-
-**Step 1: Verify Node.js is installed**
 ```bash
-node --version   # should show v16+ 
-npm --version    # should show 8+
+aws --version
+sam --version
+python3 --version
+node --version
+git --version
 ```
-If not installed: download from https://nodejs.org (LTS version)
 
-**Step 2: Create React app (skip if done last night)**
+All should return version numbers. If anything is missing, ask an AWS engineer.
+
+---
+
+## STEP 3: Configure AWS Credentials
+
+Get your credentials from the Workshop portal (catalog.workshops.aws)
+Look for the "Get AWS CLI credentials" button and copy all three values.
+
 ```bash
-npx create-react-app axis-app
+nano ~/.aws/credentials
+```
+
+Paste (replace with your actual values):
+```
+[default]
+aws_access_key_id = PASTE_YOUR_KEY
+aws_secret_access_key = PASTE_YOUR_SECRET
+aws_session_token = PASTE_YOUR_TOKEN
+```
+
+Save: Ctrl+O → Enter → Ctrl+X
+
+```bash
+nano ~/.aws/config
+```
+
+Paste:
+```
+[default]
+region = us-east-1
+output = json
+```
+
+Save: Ctrl+O → Enter → Ctrl+X
+
+Verify it works:
+```bash
+aws sts get-caller-identity
+```
+
+You should see your Account ID and role name. If you do, credentials are working.
+
+> Note: Workshop session tokens expire every few hours.
+> If you get auth errors later, re-paste fresh credentials from the portal.
+
+---
+
+## STEP 4: Clone the AXIS Repo
+
+```bash
+cd ~
+git clone https://github.com/abhishekp1703/AWS-TAMU-26.git
+cd AWS-TAMU-26
+ls
+```
+
+---
+
+## STEP 5: Check What is Already Provisioned
+
+```bash
+# Check Bedrock Claude access
+aws bedrock list-foundation-models --region us-east-1 \
+  --query "modelSummaries[?contains(modelId,'claude-3-5')].[modelId]" \
+  --output table
+
+# Check existing IAM roles (look for LabRole or ParticipantRole)
+aws iam list-roles \
+  --query "Roles[?contains(RoleName,'Lab')||contains(RoleName,'Participant')].[RoleName]" \
+  --output table
+
+# Check existing S3 buckets
+aws s3 ls
+
+# Check existing DynamoDB tables
+aws dynamodb list-tables --region us-east-1
+```
+
+Paste anything useful into WAR_ROOM.md. If Claude already shows up, Bedrock is pre-approved.
+
+---
+
+## STEP 6: Deploy All Infrastructure (One Script)
+
+Create and run this script. It sets up everything automatically:
+IAM role, S3, DynamoDB, Lambda functions, API Gateway.
+
+```bash
+cd ~/AWS-TAMU-26
+nano deploy.sh
+```
+
+Paste the entire script below into the editor, then Ctrl+O → Enter → Ctrl+X:
+
+---
+
+### deploy.sh contents — paste this exactly:
+
+```bash
+#!/bin/bash
+set -e
+
+REGION="us-east-1"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+BUCKET_NAME="axis-interviews-${ACCOUNT_ID}"
+
+echo "=== AXIS Deployment Starting ==="
+echo "Account: $ACCOUNT_ID | Bucket: $BUCKET_NAME"
+
+# 1. IAM ROLE
+echo "--- Creating IAM role..."
+if aws iam get-role --role-name axis-lambda-role 2>/dev/null; then
+    ROLE_ARN=$(aws iam get-role --role-name axis-lambda-role --query 'Role.Arn' --output text)
+    echo "Role already exists: $ROLE_ARN"
+else
+    cat > /tmp/trust.json << 'TRUSTEOF'
+{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}
+TRUSTEOF
+    ROLE_ARN=$(aws iam create-role --role-name axis-lambda-role \
+        --assume-role-policy-document file:///tmp/trust.json \
+        --query 'Role.Arn' --output text)
+    for P in AmazonBedrockFullAccess AmazonS3FullAccess AmazonDynamoDBFullAccess AWSLambdaBasicExecutionRole; do
+        aws iam attach-role-policy --role-name axis-lambda-role \
+            --policy-arn "arn:aws:iam::aws:policy/$P"
+        echo "Attached $P"
+    done
+    echo "Waiting 15s for role to propagate..."
+    sleep 15
+fi
+echo "Role ARN: $ROLE_ARN"
+
+# 2. S3 BUCKET
+echo "--- Creating S3 bucket..."
+if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+    echo "Bucket $BUCKET_NAME already exists"
+else
+    aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION"
+    aws s3api put-public-access-block --bucket "$BUCKET_NAME" \
+        --public-access-block-configuration \
+        BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false
+    cat > /tmp/cors.json << 'CORSEOF'
+{"CORSRules":[{"AllowedHeaders":["*"],"AllowedMethods":["GET","PUT","POST","DELETE"],"AllowedOrigins":["*"],"ExposeHeaders":[]}]}
+CORSEOF
+    aws s3api put-bucket-cors --bucket "$BUCKET_NAME" --cors-configuration file:///tmp/cors.json
+    echo "Created bucket: $BUCKET_NAME"
+fi
+
+# 3. DYNAMODB TABLES
+echo "--- Creating DynamoDB tables..."
+aws dynamodb describe-table --table-name axis-interviews --region "$REGION" 2>/dev/null || \
+    aws dynamodb create-table \
+        --table-name axis-interviews \
+        --attribute-definitions AttributeName=interview_id,AttributeType=S \
+        --key-schema AttributeName=interview_id,KeyType=HASH \
+        --billing-mode PAY_PER_REQUEST --region "$REGION" > /dev/null
+echo "axis-interviews ready"
+
+aws dynamodb describe-table --table-name axis-institutional-memory --region "$REGION" 2>/dev/null || \
+    aws dynamodb create-table \
+        --table-name axis-institutional-memory \
+        --attribute-definitions \
+            AttributeName=sector,AttributeType=S \
+            AttributeName=interview_id,AttributeType=S \
+        --key-schema \
+            AttributeName=sector,KeyType=HASH \
+            AttributeName=interview_id,KeyType=RANGE \
+        --billing-mode PAY_PER_REQUEST --region "$REGION" > /dev/null
+echo "axis-institutional-memory ready"
+
+# 4. LAMBDA FUNCTIONS
+echo "--- Deploying Lambda functions..."
+deploy_lambda() {
+    NAME=$1; SRCFILE=$2; TIMEOUT=$3; MEMORY=$4
+    cd /tmp && rm -rf lpkg && mkdir lpkg
+    cp ~/AWS-TAMU-26/$SRCFILE lpkg/lambda_function.py
+    cd lpkg && zip -q lambda.zip lambda_function.py && cd ..
+    if aws lambda get-function --function-name "$NAME" --region "$REGION" 2>/dev/null; then
+        aws lambda update-function-code --function-name "$NAME" \
+            --zip-file fileb:///tmp/lpkg/lambda.zip --region "$REGION" > /dev/null
+    else
+        aws lambda create-function \
+            --function-name "$NAME" --runtime python3.12 \
+            --role "$ROLE_ARN" \
+            --handler lambda_function.lambda_handler \
+            --zip-file fileb:///tmp/lpkg/lambda.zip \
+            --timeout "$TIMEOUT" --memory-size "$MEMORY" \
+            --region "$REGION" > /dev/null
+    fi
+    # Set bucket env var for pipeline and get-brief
+    if [ "$NAME" = "axis-pipeline" ] || [ "$NAME" = "axis-get-brief" ]; then
+        aws lambda update-function-configuration --function-name "$NAME" \
+            --environment "Variables={BUCKET_NAME=$BUCKET_NAME}" \
+            --region "$REGION" > /dev/null
+    fi
+    echo "Deployed $NAME"
+    cd ~/AWS-TAMU-26
+}
+
+deploy_lambda "axis-scraper"     "backend/lambda_scraper/lambda_function.py"    30  128
+deploy_lambda "axis-pipeline"    "backend/lambda_pipeline/lambda_function.py"   300 512
+deploy_lambda "axis-interviewee" "backend/lambda_interviewee/lambda_function.py" 30 128
+deploy_lambda "axis-get-brief"   "backend/lambda_debrief/lambda_function.py"    30  128
+
+# 5. API GATEWAY
+echo "--- Creating API Gateway..."
+EXISTING=$(aws apigateway get-rest-apis --region "$REGION" \
+    --query "items[?name=='axis-api'].id" --output text 2>/dev/null)
+if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
+    API_ID=$EXISTING
+    echo "axis-api already exists: $API_ID"
+else
+    API_ID=$(aws apigateway create-rest-api --name axis-api \
+        --endpoint-configuration types=REGIONAL \
+        --region "$REGION" --query 'id' --output text)
+    echo "Created API: $API_ID"
+fi
+
+ROOT_ID=$(aws apigateway get-resources --rest-api-id "$API_ID" \
+    --region "$REGION" --query "items[?path=='/'].id" --output text)
+
+mk_resource() {
+    EXISTING=$(aws apigateway get-resources --rest-api-id "$1" --region "$REGION" \
+        --query "items[?pathPart=='$3'&&parentId=='$2'].id" --output text 2>/dev/null)
+    if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then echo "$EXISTING"
+    else aws apigateway create-resource --rest-api-id "$1" --parent-id "$2" \
+        --path-part "$3" --region "$REGION" --query 'id' --output text; fi
+}
+
+mk_method() {
+    API=$1; RES=$2; METHOD=$3; FUNC=$4
+    URI="arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:${FUNC}/invocations"
+    aws apigateway put-method --rest-api-id "$API" --resource-id "$RES" \
+        --http-method "$METHOD" --authorization-type NONE \
+        --region "$REGION" > /dev/null 2>&1 || true
+    aws apigateway put-integration --rest-api-id "$API" --resource-id "$RES" \
+        --http-method "$METHOD" --type AWS_PROXY \
+        --integration-http-method POST --uri "$URI" \
+        --region "$REGION" > /dev/null 2>&1 || true
+    aws lambda add-permission --function-name "$FUNC" \
+        --statement-id "apigw-${RES}-${METHOD}-$$" \
+        --action lambda:InvokeFunction --principal apigateway.amazonaws.com \
+        --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API}/*/*" \
+        --region "$REGION" > /dev/null 2>&1 || true
+    # CORS OPTIONS
+    aws apigateway put-method --rest-api-id "$API" --resource-id "$RES" \
+        --http-method OPTIONS --authorization-type NONE \
+        --region "$REGION" > /dev/null 2>&1 || true
+    aws apigateway put-integration --rest-api-id "$API" --resource-id "$RES" \
+        --http-method OPTIONS --type MOCK \
+        --request-templates '{"application/json":"{\"statusCode\":200}"}' \
+        --region "$REGION" > /dev/null 2>&1 || true
+    aws apigateway put-method-response --rest-api-id "$API" --resource-id "$RES" \
+        --http-method OPTIONS --status-code 200 \
+        --response-parameters '{"method.response.header.Access-Control-Allow-Headers":false,"method.response.header.Access-Control-Allow-Methods":false,"method.response.header.Access-Control-Allow-Origin":false}' \
+        --region "$REGION" > /dev/null 2>&1 || true
+    aws apigateway put-integration-response --rest-api-id "$API" --resource-id "$RES" \
+        --http-method OPTIONS --status-code 200 \
+        --response-parameters "{\"method.response.header.Access-Control-Allow-Headers\":\"'Content-Type'\",\"method.response.header.Access-Control-Allow-Methods\":\"'GET,POST,OPTIONS'\",\"method.response.header.Access-Control-Allow-Origin\":\"'*'\"}" \
+        --region "$REGION" > /dev/null 2>&1 || true
+}
+
+SCRAPE_ID=$(mk_resource "$API_ID" "$ROOT_ID" "scrape")
+mk_method "$API_ID" "$SCRAPE_ID" "POST" "axis-scraper"
+
+GEN_ID=$(mk_resource "$API_ID" "$ROOT_ID" "generate")
+mk_method "$API_ID" "$GEN_ID" "POST" "axis-pipeline"
+
+BRIEF_ID=$(mk_resource "$API_ID" "$ROOT_ID" "brief")
+BRIEF_P=$(mk_resource "$API_ID" "$BRIEF_ID" "{id}")
+mk_method "$API_ID" "$BRIEF_P" "GET" "axis-get-brief"
+
+DEB_ID=$(mk_resource "$API_ID" "$ROOT_ID" "debrief")
+DEB_P=$(mk_resource "$API_ID" "$DEB_ID" "{id}")
+mk_method "$API_ID" "$DEB_P" "POST" "axis-get-brief"
+
+aws apigateway create-deployment --rest-api-id "$API_ID" \
+    --stage-name prod --region "$REGION" > /dev/null
+
+API_URL="https://${API_ID}.execute-api.${REGION}.amazonaws.com/prod"
+
+echo ""
+echo "==================================================="
+echo "  DEPLOYMENT COMPLETE"
+echo "==================================================="
+echo "  Bucket:   $BUCKET_NAME"
+echo "  API URL:  $API_URL"
+echo ""
+echo "  COPY THIS INTO App.js line 4:"
+echo "  const API_URL = '$API_URL';"
+echo "==================================================="
+```
+
+---
+
+After pasting, make it executable and run it:
+
+```bash
+chmod +x deploy.sh
+./deploy.sh 2>&1 | tee deploy.log
+```
+
+**This takes about 5-8 minutes.** Watch for any errors.
+When you see "DEPLOYMENT COMPLETE" — copy the API URL into WAR_ROOM.md immediately.
+
+---
+
+## STEP 7: Paste Prompts Into the Pipeline Lambda
+
+The pipeline Lambda has placeholder text for all 6 prompts.
+You need to replace `[PASTE X HERE]` with actual prompt content.
+
+**Fastest way — use this script:**
+
+```bash
+cd ~/AWS-TAMU-26
+python3 << 'PYEOF'
+import re
+
+# Read both files
+with open('prompts/all_prompts.py', 'r') as f:
+    prompts_code = f.read()
+
+with open('backend/lambda_pipeline/lambda_function.py', 'r') as f:
+    pipeline = f.read()
+
+# Extract each prompt variable by executing the prompts file
+namespace = {}
+exec(prompts_code, namespace)
+
+# Replace placeholders
+replacements = {
+    'SYNTHESIS_PROMPT': 'SYNTHESIS_PROMPT',
+    'TEXAS_PROMPT': 'TEXAS_PROMPT',
+    'QUESTIONS_PROMPT': 'QUESTIONS_PROMPT',
+    'GAPS_PROMPT': 'GAPS_PROMPT',
+    'ASSEMBLY_PROMPT': 'ASSEMBLY_PROMPT',
+    'SCHEMA_PROMPT': 'SCHEMA_PROMPT',
+}
+
+for var_name in replacements:
+    if var_name in namespace:
+        placeholder = f'{var_name} = """[PASTE {var_name} HERE]"""'
+        actual_value = namespace[var_name].replace('"""', '\\"\\"\\"')
+        replacement = f'{var_name} = """{namespace[var_name]}"""'
+        if placeholder in pipeline:
+            pipeline = pipeline.replace(placeholder, replacement)
+            print(f"Replaced {var_name}")
+        else:
+            print(f"WARNING: placeholder not found for {var_name}")
+
+with open('backend/lambda_pipeline/lambda_function.py', 'w') as f:
+    f.write(pipeline)
+
+print("Done - pipeline Lambda now has all prompts embedded")
+PYEOF
+```
+
+**Then redeploy just the pipeline Lambda:**
+
+```bash
+cd /tmp && rm -rf lpkg && mkdir lpkg
+cp ~/AWS-TAMU-26/backend/lambda_pipeline/lambda_function.py lpkg/lambda_function.py
+cd lpkg && zip -q lambda.zip lambda_function.py
+aws lambda update-function-code \
+    --function-name axis-pipeline \
+    --zip-file fileb:///tmp/lpkg/lambda.zip \
+    --region us-east-1
+echo "Pipeline Lambda updated with prompts"
+```
+
+---
+
+## STEP 8: Request Bedrock Access (if not already granted)
+
+```bash
+# Check status
+aws bedrock list-foundation-models --region us-east-1 \
+  --query "modelSummaries[?contains(modelId,'claude-3-5-sonnet')].[modelId,modelLifecycle.status]" \
+  --output table
+```
+
+If status is not ACTIVE:
+1. Go to AWS Console → search **Bedrock**
+2. Left sidebar → **Model access**
+3. Click **Modify model access**
+4. Check **Claude 3.5 Sonnet** and **Claude 3 Sonnet** (backup)
+5. Submit → wait 2-5 minutes → refresh until "Access granted"
+
+---
+
+## STEP 9: Deploy the Frontend
+
+```bash
+cd ~/AWS-TAMU-26
+
+# Update the API URL in App.js (replace with your actual URL from deploy.sh output)
+API_URL="https://REPLACE_WITH_YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod"
+sed -i "s|YOUR_API_GATEWAY_URL_HERE|$API_URL|g" frontend/src/App.js
+
+# Verify it was replaced
+grep "API_URL" frontend/src/App.js | head -1
+```
+
+**Build and deploy to Amplify:**
+
+```bash
+# Check if npm is available
+npm --version || (curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs)
+
+# Create React app
+cd ~
+npx create-react-app axis-app --template minimal 2>/dev/null || npx create-react-app axis-app
 cd axis-app
 npm install axios react-router-dom
-```
 
-**Step 3: Replace App.js**
-```bash
-# Clone/pull the repo if not already done
-git clone https://github.com/abhishekp1703/AWS-TAMU-26.git
+# Copy App.js
+cp ~/AWS-TAMU-26/frontend/src/App.js src/App.js
 
-# Copy the App.js from repo to your React app
-cp AWS-TAMU-26/frontend/src/App.js axis-app/src/App.js
-```
-
-**Step 4: Set your API URL**
-
-Open `axis-app/src/App.js` in any text editor
-Find line 4:
-```javascript
-const API_URL = 'YOUR_API_GATEWAY_URL_HERE';
-```
-Replace with your actual API Gateway URL from WAR_ROOM.md:
-```javascript
-const API_URL = 'https://abc123xyz.execute-api.us-east-1.amazonaws.com/prod';
-```
-Save the file.
-
-**Step 5: Build**
-```bash
-cd axis-app
+# Build
 npm run build
-# Takes about 60 seconds
-# Creates a 'build' folder when done
+echo "Build complete"
 ```
 
-**Step 6: Deploy to Amplify**
-1. In AWS Console → Search **Amplify** → click it
-2. Click **Create new app**
-3. Choose **Deploy without Git**
-4. App name: `axis-frontend`
-5. Drag and drop your entire **build** folder into the upload box
-6. Click **Save and deploy**
-7. Wait ~2 minutes
-8. Copy your app URL (looks like `https://main.abc123.amplifyapp.com`)
-9. Paste into WAR_ROOM.md ✅
+**Deploy to Amplify via CLI:**
+
+```bash
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+REGION="us-east-1"
+
+# Create Amplify app
+APP_ID=$(aws amplify create-app \
+    --name axis-frontend \
+    --region "$REGION" \
+    --query 'app.appId' --output text)
+
+echo "Amplify App ID: $APP_ID"
+
+# Create branch
+aws amplify create-branch \
+    --app-id "$APP_ID" \
+    --branch-name main \
+    --region "$REGION" > /dev/null
+
+# Zip the build folder and deploy
+cd ~/axis-app
+zip -r /tmp/build.zip build/
+
+aws amplify start-deployment \
+    --app-id "$APP_ID" \
+    --branch-name main \
+    --source-url "s3://" \
+    --region "$REGION" > /dev/null || echo "Use manual deploy below"
+
+echo ""
+echo "If Amplify CLI deploy failed, use manual method:"
+echo "1. Open AWS Console → Amplify"
+echo "2. Click your app → Hosting → Deploy without Git"
+echo "3. Drag the ~/axis-app/build folder"
+```
+
+**OR the manual fallback (always works):**
+
+1. Open AWS Console → search **Amplify**
+2. Your app should already be there — click it
+3. If not: New app → Host web app → Deploy without Git
+4. Drag the `~/axis-app/build` folder into the upload box
+5. Save and deploy → wait 2 minutes → copy URL
 
 ---
 
-## PART 8: Final Integration Test
+## STEP 10: Test the Full Flow
 
-Run through this checklist before anyone starts on slides:
+```bash
+# Quick API test
+API_URL=$(grep "API_URL" ~/AWS-TAMU-26/frontend/src/App.js | grep -o "https://[^'\"]*")
+echo "Testing: $API_URL"
 
-```
-□ Open your Amplify URL — AXIS home page loads
-□ Type "GridFlex Energy" + any URL → click Generate
-□ Wait 60-90 seconds → brief appears with interview_id
-□ Click Schema tab → Document 4 schema shows with orange fields
-□ Click Email tab → interviewee email shows, looks clean
-□ Open new tab: [your-amplify-url]/i/[interview_id]
-  → Info page loads, NO survey, NO toggles ✓
-□ Back on brief: click Post-Interview tab
-  → Fill in debrief fields → Save
-  → "Debrief Complete" message appears ✓
-□ Confirm DynamoDB: open axis-interviews table → item exists with debrief_completed: true
+curl -s -X POST "$API_URL/scrape" \
+  -H "Content-Type: application/json" \
+  -d '{"company_name":"GridFlex Energy","company_url":"https://example.com"}' | python3 -m json.tool | head -20
 ```
 
-All 7 checked = you're ready to demo 🎉
+If you get JSON back with `scraped_content` — the backend is working.
+
+Then open your Amplify URL in a browser and run the full flow:
+1. Type GridFlex Energy → Generate
+2. Wait 90 seconds → brief appears
+3. Click Schema tab → Document 4 shows
+4. Click Email tab → info email shows
+5. Open /i/{interview_id} → info page, no survey
+6. Post-Interview tab → fill debrief → save → Complete
 
 ---
 
-## Common Workshop Account Issues & Fixes
+## Common Issues in Workshop Accounts
 
-| Issue | Fix |
-|-------|-----|
-| "Not authorized to perform: iam:CreateRole" | Use the existing LabRole or WSParticipantRole — find it in IAM → Roles |
-| Bedrock "Model access" not visible | Ask AWS engineer — some workshop configs pre-approve or restrict Bedrock differently |
-| Lambda can't write to S3 | Check the IAM role has AmazonS3FullAccess — or add inline policy |
-| API Gateway CORS error in browser | Re-run Enable CORS on each resource, redeploy to prod |
-| Amplify shows old version | Hard refresh: Ctrl+Shift+R on Windows, Cmd+Shift+R on Mac |
-| Lambda execution role error | In Lambda → Configuration → Permissions → confirm role shows axis-lambda-role |
-| DynamoDB "ResourceNotFoundException" | Lambda is pointing to wrong table name — verify exact spelling: axis-interviews |
-| Workshop account session expires | Re-login via catalog.workshops.aws — your resources persist, just the session expires |
-
----
-
-## If You Get Stuck
-
-1. Check **CloudWatch Logs** for the failing Lambda:
-   - Lambda → Functions → click function → Monitor tab → View CloudWatch logs
-   - The error will be in the latest log stream
-
-2. Most common errors and what they mean:
-   ```
-   "AccessDeniedException"  → IAM role missing a permission
-   "ResourceNotFoundException" → Wrong table/bucket name (check spelling)
-   "ModelNotReady" → Bedrock approval still pending (wait and retry)
-   "Task timed out" → Increase Lambda timeout (pipeline needs 5 min)
-   ```
-
-3. Ask an AWS engineer — they're there to help and expect these questions
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `not authorized: iam:CreateRole` | Role permissions restricted | Find LabRole/ParticipantRole in IAM, use that ARN instead |
+| `ModelNotReady` in Lambda logs | Bedrock not approved yet | Approve in Console → wait 5 min |
+| `NoSuchBucket` | Bucket name mismatch | Check BUCKET_NAME env var on Lambda matches actual bucket |
+| `AccessDenied` on S3 | IAM role missing S3 policy | Re-attach AmazonS3FullAccess to role |
+| Credentials expired | Workshop tokens expire | Re-paste fresh creds from portal into ~/.aws/credentials |
+| Lambda timeout | Pipeline needs 5 min | aws lambda update-function-configuration --timeout 300 |
