@@ -1,5 +1,5 @@
 """
-AXIS — All Bedrock Prompts
+AXIS — All Bedrock Prompts (Updated v2)
 Paste this entire file into lambda_pipeline/lambda_function.py
 Temperature settings are specified per prompt.
 """
@@ -198,7 +198,15 @@ Produce JSON with exactly these fields:
     }
   ],
   "recommended_verification_questions": [],
-  "what_public_sources_consistently_miss_about_this_sector": ""
+  "what_public_sources_consistently_miss_about_this_sector": "",
+  "likely_ai_assumptions_that_may_be_wrong": [
+    {
+      "assumption": "",
+      "why_ai_made_it": "",
+      "what_reality_might_be": "",
+      "opening_question": ""
+    }
+  ]
 }
 
 Be specific. "More financial detail needed" is NOT acceptable.
@@ -288,3 +296,76 @@ Texas A&M University
 Write both documents completely. Do not truncate."""
 
 # Temperature: 0.4
+
+
+# ============================================================
+# CALL 6 — Texas Insights Schema (Document 4 Pre-Fill)
+# ============================================================
+
+SCHEMA_PROMPT = """You are a business intelligence analyst completing a structured
+intelligence schema for the Texas A&M business knowledge graph.
+
+This schema captures structured insights about a Texas company and will be stored
+to brief future interviewers about this sector. Flag unknown fields clearly.
+
+<company_profile>{{OUTPUT_FROM_CALL_1}}</company_profile>
+<texas_context>{{OUTPUT_FROM_CALL_2}}</texas_context>
+<knowledge_gaps>{{OUTPUT_FROM_CALL_4}}</knowledge_gaps>
+
+Fill in as much as you can from available information.
+Use "To verify in interview" for fields you cannot determine with confidence.
+NEVER fabricate data.
+
+{
+  "company_profile": {
+    "company_name": "",
+    "industry": "",
+    "subsector": "",
+    "geography": "",
+    "stage": "pre-revenue|early|growth|mature|decline",
+    "team_size": "",
+    "revenue_model": "",
+    "capital_intensity": "high|medium|low",
+    "business_model_type": "hardware|marketplace|infrastructure|saas|hybrid|services|distribution"
+  },
+  "revenue_mechanics": {
+    "who_pays": "",
+    "when_they_pay": "upfront|milestone|recurring|project",
+    "is_recurring": "yes|no|partial",
+    "fulfillment_dependencies": [],
+    "margin_band": ""
+  },
+  "constraint_map": {
+    "top_3_constraints": ["", "", ""],
+    "primary_constraint_type": "demand|fulfillment|capital|regulation|strategic_execution|talent",
+    "constraint_notes": ""
+  },
+  "market_structure": {
+    "regulatory_structure": "",
+    "competitive_fragmentation": "high|medium|low",
+    "barriers_to_entry": "",
+    "disintermediation_risk": ""
+  },
+  "strategic_tensions": {
+    "expansion_risk": "",
+    "concentration_risk": "",
+    "regulatory_risk": "",
+    "succession_or_exit": ""
+  },
+  "ai_opportunity_areas": [],
+  "knowledge_graph_tags": {
+    "industry_cluster": "",
+    "texas_region": "",
+    "ercot_exposure": "high|medium|low|none",
+    "risk_flags": [],
+    "growth_signals": []
+  },
+  "fields_to_verify_in_interview": [],
+  "pre_fill_confidence": "high|medium|low",
+  "schema_completeness_percent": 0,
+  "last_updated": "pre-interview-ai-generated"
+}
+
+Return ONLY the JSON. No preamble."""
+
+# Temperature: 0.2

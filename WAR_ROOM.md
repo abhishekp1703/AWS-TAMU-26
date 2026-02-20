@@ -1,150 +1,123 @@
 # ⚡ AXIS — War Room
-### Fill this in LIVE as you create each service tomorrow
-
-> **Rule: Every URL, ARN, and name goes here immediately. Don't rely on memory.**
+### Fill this LIVE. Every URL and ARN goes here the moment you create it.
 
 ---
 
 ## AWS Account
 ```
-Account ID:        [PASTE HERE]
-Region:            us-east-1  ← NEVER CHANGE THIS
-Login URL:         https://console.aws.amazon.com
+Account ID:     [PASTE]
+Region:         us-east-1  ← NEVER CHANGE THIS
+Console:        https://console.aws.amazon.com
 ```
 
 ---
 
 ## IAM
 ```
-Role Name:         axis-lambda-role
-Role ARN:          [PASTE HERE after creating]
+Role Name:      axis-lambda-role
+Role ARN:       [PASTE]
+Policies:       AmazonBedrockFullAccess ✓  AmazonS3FullAccess ✓
+                AmazonDynamoDBFullAccess ✓  AWSLambdaBasicExecutionRole ✓
 ```
 
 ---
 
 ## S3
 ```
-Bucket Name:       axis-interviews-[YOURTEAMNAME]
-Bucket ARN:        [PASTE HERE]
-Bucket URL:        https://s3.console.aws.amazon.com/s3/buckets/[bucketname]
+Bucket Name:    axis-interviews-[YOURTEAMNAME]
+CORS:           ✓ Configured
 ```
 
 ---
 
 ## DynamoDB
 ```
-Table 1:           axis-interviews          Status: [ ] Active
-Table 2:           axis-institutional-memory Status: [ ] Active
+axis-interviews              [ ] Active
+axis-institutional-memory    [ ] Active
 ```
 
 ---
 
 ## Amazon Bedrock
 ```
-Model ID:          anthropic.claude-3-5-sonnet-20241022-v2:0
-Backup Model ID:   anthropic.claude-3-sonnet-20240229-v1:0
-Access Status:     [ ] Requested  [ ] Granted
+Primary:   anthropic.claude-3-5-sonnet-20241022-v2:0
+Backup:    anthropic.claude-3-sonnet-20240229-v1:0
+Status:    [ ] Requested   [ ] GRANTED ← pipeline won't work until granted
 ```
 
 ---
 
 ## Lambda Functions
 ```
-Function 1:
-  Name:            axis-scraper
-  ARN:             [PASTE HERE]
-  Timeout:         30 seconds
-  Status:          [ ] Deployed  [ ] Tested
-
-Function 2:
-  Name:            axis-pipeline
-  ARN:             [PASTE HERE]
-  Timeout:         300 seconds (5 min)
-  Status:          [ ] Deployed  [ ] Tested
-
-Function 3:
-  Name:            axis-interviewee
-  ARN:             [PASTE HERE]
-  Timeout:         30 seconds
-  Status:          [ ] Deployed  [ ] Tested
-
-Function 4:
-  Name:            axis-debrief
-  ARN:             [PASTE HERE]
-  Timeout:         30 seconds
-  Status:          [ ] Deployed  [ ] Tested
+axis-scraper        Timeout: 30s      [ ] Deployed  [ ] Tested
+axis-pipeline       Timeout: 300s     [ ] Deployed  [ ] Tested (use GridFlex)
+                    Memory: 512MB
+                    BUCKET_NAME: updated ✓
+                    All 6 prompts pasted ✓
+axis-interviewee    Timeout: 30s      [ ] Deployed
+axis-get-brief      Timeout: 30s      [ ] Deployed
+                    BUCKET_NAME: updated ✓
 ```
 
 ---
 
 ## API Gateway
 ```
-API Name:          axis-api
-API ID:            [PASTE HERE]
-Stage:             prod
-Invoke URL:        [PASTE HERE — this goes in App.js]
+API Name:   axis-api
+Stage:      prod
+Invoke URL: [PASTE HERE → goes into App.js line 4]
 
-Endpoints:
-  POST /scrape       [ ] Created  [ ] Tested
-  POST /generate     [ ] Created  [ ] Tested
-  GET  /brief/{id}   [ ] Created  [ ] Tested
-  POST /interviewee/{id} [ ] Created  [ ] Tested
-  POST /debrief/{id}     [ ] Created  [ ] Tested
+POST /scrape           [ ] Created  [ ] Tested
+POST /generate         [ ] Created  [ ] Tested
+GET  /brief/{id}       [ ] Created  [ ] Tested
+POST /debrief/{id}     [ ] Created  [ ] Tested
+CORS on all routes:    [ ] Done
+Deployed to prod:      [ ] Done
 ```
 
 ---
 
 ## Amplify
 ```
-App Name:          axis-frontend
-App URL:           [PASTE HERE — share this with team]
-Interviewee URL:   [App URL]/i/{interview_id}
-Status:            [ ] Deployed  [ ] Tested
+App URL:              [PASTE → share with team]
+API_URL in App.js:    [ ] Updated
+Rebuilt after update: [ ] Done
+Status:               [ ] Deployed  [ ] Home page loads
 ```
 
 ---
 
-## Integration Checklist
+## GridFlex Demo Pre-Load
 ```
-[ ] Frontend calls API Gateway successfully
-[ ] API Gateway triggers Lambda scraper
-[ ] Scraper passes data to pipeline Lambda
-[ ] Pipeline Lambda calls Bedrock (all 5 calls)
-[ ] Brief saved to S3
-[ ] Metadata saved to DynamoDB
-[ ] Interviewee microsite loads at /i/{id}
-[ ] Interviewee response saves to DynamoDB
-[ ] Interviewer dashboard shows response notification
-[ ] Full end-to-end test with H-E-B ✓
+GridFlex interview_id: [PASTE after generating]
+Brief tab:             [ ] Shows brief with "What AI Got Wrong" section
+Schema tab:            [ ] Document 4 schema populated
+Email tab:             [ ] Info email shows (no survey)
+Post-Interview tab:    [ ] Debrief saved, shows "Complete"
+Interviewee page:      [ ] /i/[id] loads, shows info only, no survey
 ```
 
 ---
 
-## Team Status Board (update every 45 min)
+## Full Integration Test (Run Before Presenting)
 ```
-10:00 AM Check-in:
-Person 2 (Pipeline):
-Person 3 (Scraper/AWS):
-Person 4 (Frontend):
-Person 5 (Presentation):
-Blockers:
-
-11:00 AM Check-in:
-Person 2 (Pipeline):
-Person 3 (Scraper/AWS):
-Person 4 (Frontend):
-Person 5 (Presentation):
-Blockers:
-
-12:00 PM Check-in:
-Person 2 (Pipeline):
-Person 3 (Scraper/AWS):
-Person 4 (Frontend):
-Person 5 (Presentation):
-What to cut if behind:
-
-02:00 PM Check-in:
-Integration working: Y/N
-Demo path clear: Y/N
-Backup video recorded: Y/N
+[ ] Open Amplify URL → home page loads
+[ ] Type GridFlex Energy → brief generates in ~90s
+[ ] Brief tab: ⚠️ What AI Got Wrong section visible
+[ ] Schema tab: Document 4 pre-filled, orange "verify" fields showing
+[ ] Email tab: info email copy works, no survey elements
+[ ] /i/[id]: opens in new tab, shows info page, no toggles
+[ ] Post-Interview: fill debrief → save → "Complete" message
+All 7: 🎉 READY
 ```
+
+---
+
+## Status Updates (Every 45 Min)
+```
+10:00 AM — Person 2 (Pipeline): | Person 3 (AWS): | Person 4 (Frontend): | Blockers:
+11:00 AM — Person 2: | Person 3: | Person 4: | Blockers:
+12:00 PM — Pipeline E2E: Y/N | Frontend: Y/N | Schema tab: Y/N | Cut if behind:
+02:00 PM — Full demo: Y/N | Backup video: Y/N | Slides final: Y/N
+```
+debrief_completed: [ ] Shows Complete

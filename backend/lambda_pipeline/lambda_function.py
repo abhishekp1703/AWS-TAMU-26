@@ -1,5 +1,5 @@
 """
-AXIS — Lambda #2: Bedrock Pipeline
+AXIS — Lambda #2: Bedrock Pipeline (Updated v2)
 Deploy to: axis-pipeline
 Runtime: Python 3.12
 Timeout: 300 seconds (5 minutes) ← CRITICAL, must set this
@@ -25,13 +25,14 @@ MODEL_ID = 'anthropic.claude-3-5-sonnet-20241022-v2:0'
 BACKUP_MODEL_ID = 'anthropic.claude-3-sonnet-20240229-v1:0'
 
 # ============================================================
-# PASTE ALL PROMPTS HERE FROM prompts/all_prompts.py
+# PASTE ALL 6 PROMPTS HERE FROM prompts/all_prompts.py
 # ============================================================
 SYNTHESIS_PROMPT = """[PASTE SYNTHESIS_PROMPT HERE]"""
 TEXAS_PROMPT = """[PASTE TEXAS_PROMPT HERE]"""
 QUESTIONS_PROMPT = """[PASTE QUESTIONS_PROMPT HERE]"""
 GAPS_PROMPT = """[PASTE GAPS_PROMPT HERE]"""
 ASSEMBLY_PROMPT = """[PASTE ASSEMBLY_PROMPT HERE]"""
+SCHEMA_PROMPT = """[PASTE SCHEMA_PROMPT HERE]"""
 
 
 def call_bedrock(prompt, temperature=0.3, max_tokens=4000):
@@ -222,24 +223,44 @@ def lambda_handler(event, context):
         max_tokens=6000
     )
 
-    # ── Split brief and interviewee packet ───────────────────
+    # ── CALL 6: Texas Insights Schema (Document 4) ──────────
+    print(f"[{interview_id}] Call 6: Intelligence Schema...")
+    schema_raw = call_bedrock(
+        fill_prompt(SCHEMA_PROMPT, {
+            "OUTPUT_FROM_CALL_1": profile,
+            "OUTPUT_FROM_CALL_2": texas,
+            "OUTPUT_FROM_CALL_4": gaps
+        }),
+        temperature=0.2,
+        max_tokens=2000
+    )
+    try:
+        import re as _re
+        schema_text = schema_raw
+        json_match = _re.search(r'\{.*\}', schema_raw, _re.DOTALL)
+        schema = json.loads(json_match.group()) if json_match else {}
+    except:
+        schema = {}
+
+    # ── Split brief and interviewee email ───────────────────
     interviewer_brief = final_brief
-    interviewee_packet = ""
-    if "===INTERVIEWEE_PACKET===" in final_brief:
+    interviewee_email = ""
+    if "===INTERVIEWEE_EMAIL===" in final_brief:
+        parts = final_brief.split("===INTERVIEWEE_EMAIL===")
+        interviewer_brief = parts[0].strip()
+        interviewee_email = parts[1].strip()
+    elif "===INTERVIEWEE_PACKET===" in final_brief:
         parts = final_brief.split("===INTERVIEWEE_PACKET===")
         interviewer_brief = parts[0].strip()
-        interviewee_packet = parts[1].strip()
-
-    # ── Extract structured data for microsite ────────────────
-    facts = extract_facts_for_interviewee(final_brief)
-    interviewee_questions = extract_interviewee_questions(questions)
+        interviewee_email = parts[1].strip()
 
     # ── Save to S3 ───────────────────────────────────────────
     save_to_s3(interview_id, interviewer_brief, 'interviewer_brief.txt')
-    save_to_s3(interview_id, interviewee_packet, 'interviewee_packet.txt')
+    save_to_s3(interview_id, interviewee_email, 'interviewee_email.txt')
     save_to_s3(interview_id, profile, 'raw_profile.json')
     save_to_s3(interview_id, questions, 'questions.json')
     save_to_s3(interview_id, gaps, 'gaps.json')
+    save_to_s3(interview_id, json.dumps(schema, indent=2), 'schema.json')
 
     # ── Save to DynamoDB ─────────────────────────────────────
     elapsed = round(time.time() - start_time, 1)
@@ -249,16 +270,14 @@ def lambda_handler(event, context):
         'sector': sector,
         'created_at': str(int(time.time())),
         'elapsed_seconds': str(elapsed),
-        'status': 'pending_interviewee_response',
+        'status': 'brief_ready',
         'brief_s3_key': f'{interview_id}/interviewer_brief.txt',
-        'packet_s3_key': f'{interview_id}/interviewee_packet.txt',
+        'email_s3_key': f'{interview_id}/interviewee_email.txt',
+        'schema_s3_key': f'{interview_id}/schema.json',
         'questions_s3_key': f'{interview_id}/questions.json',
-        'interviewee_facts': facts,
-        'interviewee_questions': interviewee_questions,
-        'interviewee_corrections': [],
-        'interviewee_selected_questions': [],
-        'interviewee_wildcard': '',
-        'post_interview_debrief': {}
+        'schema_preview': schema,
+        'post_interview_debrief': {},
+        'debrief_completed': False
     })
 
     print(f"[{interview_id}] Pipeline complete in {elapsed}s")
@@ -272,10 +291,10 @@ def lambda_handler(event, context):
         'body': json.dumps({
             'interview_id': interview_id,
             'company_name': company_name,
+            'sector': sector,
             'brief': interviewer_brief,
-            'interviewee_packet': interviewee_packet,
-            'facts': facts,
-            'interviewee_questions': interviewee_questions,
+            'interviewee_email': interviewee_email,
+            'schema': schema,
             'elapsed_seconds': elapsed
         })
     }
