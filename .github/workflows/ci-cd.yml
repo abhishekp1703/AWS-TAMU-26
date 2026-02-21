@@ -1,0 +1,177 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install flake8 black pylint
+      
+      - name: Lint with flake8
+        run: |
+          flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 backend/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      
+      - name: Format check with black
+        run: |
+          black --check backend/
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov moto
+      
+      - name: Run tests
+        run: |
+          pytest backend/tests/ -v --cov=backend --cov-report=xml
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+      
+      - name: Build
+        working-directory: ./frontend
+        run: npm run build
+        env:
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL || 'https://api.example.com' }}
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+
+  package-lambdas:
+    name: Package Lambda Functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Package Lambda functions
+        run: |
+          mkdir -p dist
+          for lambda_dir in backend/lambda_*; do
+            lambda_name=$(basename $lambda_dir)
+            echo "Packaging $lambda_name..."
+            cd $lambda_dir
+            zip -r ../../dist/${lambda_name}.zip . -x "*.pyc" "__pycache__/*" "*.git*"
+            cd ../..
+          done
+      
+      - name: Upload Lambda packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-packages
+          path: dist/
+
+  deploy:
+    name: Deploy to AWS
+    needs: [lint, test, build-frontend, package-lambdas]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.api_url }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-packages
+          path: dist/
+      
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --template-file infrastructure/cloudformation/template.yaml \
+            --stack-name axis-production \
+            --parameter-overrides \
+              Environment=production \
+              BucketName=${{ secrets.S3_BUCKET_NAME }} \
+              AllowedOrigins=${{ secrets.ALLOWED_ORIGINS }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region ${{ env.AWS_REGION }}
+      
+      - name: Deploy Lambda functions
+        run: |
+          for zip_file in dist/*.zip; do
+            lambda_name=$(basename $zip_file .zip)
+            echo "Deploying $lambda_name..."
+            aws lambda update-function-code \
+              --function-name axis-${lambda_name#lambda_} \
+              --zip-file fileb://$zip_file \
+              --region ${{ env.AWS_REGION }}
+          done
+      
+      - name: Get API Gateway URL
+        id: deploy
+        run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name axis-production \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApiGatewayUrl`].OutputValue' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT

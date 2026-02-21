@@ -1,0 +1,376 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AXIS - Adaptive Interview Intelligence Infrastructure'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  BucketName:
+    Type: String
+    Description: S3 bucket name for interview data (must be globally unique)
+  
+  AllowedOrigins:
+    Type: String
+    Default: '*'
+    Description: Comma-separated list of allowed CORS origins
+
+Resources:
+  # S3 Bucket for interview data
+  InterviewDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
+      Encryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: AXIS
+
+  # DynamoDB Tables
+  InterviewsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: axis-interviews
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: interview_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: interview_id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: AXIS
+
+  InstitutionalMemoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: axis-institutional-memory
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sector
+          AttributeType: S
+        - AttributeName: interview_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sector
+          KeyType: HASH
+        - AttributeName: interview_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: InterviewIdIndex
+          KeySchema:
+            - AttributeName: interview_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: AXIS
+
+  # IAM Role for Lambda Functions
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'axis-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${InterviewDataBucket}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Ref InterviewDataBucket
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt InterviewsTable.Arn
+                  - !GetAtt InstitutionalMemoryTable.Arn
+                  - !Sub '${InstitutionalMemoryTable.Arn}/index/*'
+        - PolicyName: XRayAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+
+  # API Gateway
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub 'axis-api-${Environment}'
+      Description: AXIS Interview Intelligence API
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ScrapeMethod
+      - GenerateMethod
+      - BriefMethod
+      - DebriefMethod
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: prod
+
+  # API Gateway Resources
+  ScrapeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: scrape
+
+  GenerateResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: generate
+
+  BriefResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: brief
+
+  BriefIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !Ref BriefResource
+      PathPart: '{id}'
+
+  DebriefResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !Ref BriefIdResource
+      PathPart: debrief
+
+  # API Gateway Methods (simplified - you'll need to add Lambda integrations)
+  ScrapeMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ScrapeResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScraperLambda.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+
+  GenerateMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref GenerateResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PipelineLambda.Arn}/invocations'
+
+  BriefMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref BriefIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DebriefLambda.Arn}/invocations'
+
+  DebriefMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref DebriefResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DebriefLambda.Arn}/invocations'
+
+  # Lambda Functions (placeholder - you'll need to deploy code separately)
+  ScraperLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'axis-scraper-${Environment}'
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref InterviewDataBucket
+          DYNAMODB_INTERVIEWS_TABLE: !Ref InterviewsTable
+          DYNAMODB_MEMORY_TABLE: !Ref InstitutionalMemoryTable
+          AWS_REGION: !Ref AWS::Region
+      TracingConfig:
+        Mode: Active
+
+  PipelineLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'axis-pipeline-${Environment}'
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref InterviewDataBucket
+          DYNAMODB_INTERVIEWS_TABLE: !Ref InterviewsTable
+          DYNAMODB_MEMORY_TABLE: !Ref InstitutionalMemoryTable
+          AWS_REGION: !Ref AWS::Region
+          BEDROCK_MODEL_ID: anthropic.claude-3-5-sonnet-20241022-v2:0
+          BEDROCK_BACKUP_MODEL_ID: anthropic.claude-3-sonnet-20240229-v1:0
+      TracingConfig:
+        Mode: Active
+
+  DebriefLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'axis-debrief-${Environment}'
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref InterviewDataBucket
+          DYNAMODB_INTERVIEWS_TABLE: !Ref InterviewsTable
+          DYNAMODB_MEMORY_TABLE: !Ref InstitutionalMemoryTable
+          AWS_REGION: !Ref AWS::Region
+      TracingConfig:
+        Mode: Active
+
+  # Lambda Permissions
+  ScraperLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScraperLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*'
+
+  PipelineLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PipelineLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*'
+
+  DebriefLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DebriefLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*'
+
+Outputs:
+  ApiGatewayUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  S3BucketName:
+    Description: S3 bucket name for interview data
+    Value: !Ref InterviewDataBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+
+  InterviewsTableName:
+    Description: DynamoDB table name for interviews
+    Value: !Ref InterviewsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-InterviewsTable'
+
+  InstitutionalMemoryTableName:
+    Description: DynamoDB table name for institutional memory
+    Value: !Ref InstitutionalMemoryTable
+    Export:
+      Name: !Sub '${AWS::StackName}-MemoryTable'
