@@ -1,4 +1,4 @@
-# ⚡ AXIS — Adaptive Interview Intelligence
+# AXIS — Adaptive Interview Intelligence
 ### Texas A&M Hackathon 2026 | Built on Amazon Bedrock
 
 ---
